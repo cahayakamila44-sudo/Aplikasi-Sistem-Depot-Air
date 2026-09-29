@@ -1,0 +1,51 @@
+name: Deploy Web App ke GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Siapkan file website
+        run: |
+          mkdir -p _site/css
+          mkdir -p _site/js
+
+          cp "Frontend/HTML/Index.html" "_site/index.html"
+          cp "Frontend/CSS/Style.css" "_site/css/style.css"
+          cp "Frontend/JS/Config.js" "_site/js/config.js"
+          cp "Frontend/JS/apps.js" "_site/js/apps.js"
+
+          # Sesuaikan path CSS dan JavaScript untuk GitHub Pages
+          sed -i 's#../css/style.css#css/style.css#' "_site/index.html"
+          sed -i 's#../js/config.js#js/config.js#' "_site/index.html"
+          sed -i 's#../js/apps.js#js/apps.js#' "_site/index.html"
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: "_site"
+
+      - name: Deploy ke GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

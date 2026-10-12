@@ -137,69 +137,49 @@ Satuan           : Galon
 
 Secara konseptual, hubungan data utama dalam Sistem Depot Air Minum dapat digambarkan sebagai berikut:
 
-```
-┌─────────────────────────┐
-│        PELANGGAN        │
-├─────────────────────────┤
-│ PK  id_pelanggan        │
-│     nama_pelanggan      │
-│     no_hp               │
-│     alamat              │
-│     created_at          │
-└────────────┬────────────┘
-             │
-             │ 1
-             │
-             │ N
-             ▼
-┌─────────────────────────┐
-│        PENJUALAN        │
-├─────────────────────────┤
-│ PK  id_penjualan        │
-│ FK  id_pelanggan        │
-│ FK  id_persediaan       │
-│     tanggal_penjualan   │
-│     jumlah_galon        │
-│     harga_per_galon     │
-│     total_penjualan     │
-│     status_pembayaran   │
-│     created_at          │
-└───────────┬─────────────┘
-            │
-            │ 1
-            │
-            │ N
-            ▼
-┌─────────────────────────┐
-│     PENERIMAAN_KAS      │
-├─────────────────────────┤
-│ PK  id_penerimaan       │
-│ FK  id_penjualan        │
-│     tanggal_penerimaan  │
-│     jumlah_diterima     │
-│     metode_pembayaran   │
-│     created_at          │
-└─────────────────────────┘
+```mermaid
+erDiagram
+    PELANGGAN ||--o{ PENJUALAN : melakukan
+    PERSEDIAAN ||--o{ PENJUALAN : mencatat
+    PENJUALAN ||--o{ PENERIMAAN_KAS : menerima
 
+    PELANGGAN {
+        bigint id_pelanggan PK
+        varchar nama_pelanggan
+        varchar no_hp
+        text alamat
+        timestamptz created_at
+    }
 
-┌─────────────────────────┐
-│       PERSEDIAAN        │
-├─────────────────────────┤
-│ PK  id_persediaan       │
-│     nama_barang         │
-│     stok                │
-│     harga               │
-│     satuan              │
-│     updated_at          │
-└────────────┬────────────┘
-             │
-             │ 1
-             │
-             │ N
-             ▼
-       ┌─────────────┐
-       │  PENJUALAN  │
-       └─────────────┘
+    PERSEDIAAN {
+        bigint id_persediaan PK
+        varchar nama_barang
+        integer stok
+        varchar satuan
+        timestamptz updated_at
+        numeric harga
+    }
+
+    PENJUALAN {
+        bigint id_penjualan PK
+        bigint id_pelanggan FK
+        bigint id_persediaan FK
+        date tanggal_penjualan
+        integer jumlah_galon
+        numeric harga_per_galon
+        numeric total_penjualan
+        varchar status_pembayaran
+        timestamptz created_at
+    }
+
+    PENERIMAAN_KAS {
+        bigint id_penerimaan PK
+        bigint id_penjualan FK
+        date tanggal_penerimaan
+        numeric jumlah_diterima
+        varchar metode_pembayaran
+        timestamptz created_at
+    }
 ```
 
 Relasi antar entitas:

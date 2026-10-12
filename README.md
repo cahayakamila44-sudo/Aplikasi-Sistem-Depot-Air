@@ -330,23 +330,6 @@ https://github.com/cahayakamila44-sudo/Aplikasi-Sistem-Depot-Air
 - Keamanan database bergantung pada konfigurasi policy dan RLS yang diterapkan pada Supabase.
 - Untuk jumlah data yang semakin besar, sistem masih dapat dikembangkan dengan pagination, pencarian, filter, dan laporan yang lebih lengkap.
 
-## Pengembangan Selanjutnya
-
-Beberapa fitur yang dapat ditambahkan pada pengembangan berikutnya:
-
-- Login dan autentikasi pengguna
-- Manajemen pelanggan
-- Laporan penjualan per periode
-- Laporan penerimaan kas
-- Pencarian dan filter transaksi
-- Notifikasi stok minimum
-- Riwayat perubahan persediaan
-- Jurnal umum otomatis
-- Buku besar
-- Laporan laba rugi
-- Cetak atau ekspor laporan
-- Dashboard dengan grafik penjualan
-
 ## Tentang Project
 
 **Sistem Depot Air Minum – Sistem Penjualan & Penerimaan Kas**

@@ -295,15 +295,6 @@ https://github.com/cahayakamila44-sudo/Aplikasi-Sistem-Depot-Air
 - Validasi data sebaiknya tidak hanya dilakukan pada browser, tetapi juga pada sisi database.
 - Untuk penggunaan produksi, autentikasi pengguna dan **Row Level Security (RLS)** sebaiknya diaktifkan.
 
-## Keterbatasan
-
-- Sistem masih berupa aplikasi sederhana untuk pengelolaan penjualan dan penerimaan kas depot air minum.
-- Sistem belum memiliki fitur login pengguna pada antarmuka yang tersedia.
-- Menu utama masih terbatas pada Dashboard, Penjualan, Penerimaan Kas, dan Persediaan.
-- Sistem belum menampilkan jurnal umum, buku besar, maupun laporan keuangan lengkap.
-- Keamanan database bergantung pada konfigurasi policy dan RLS yang diterapkan pada Supabase.
-- Untuk jumlah data yang semakin besar, sistem masih dapat dikembangkan dengan pagination, pencarian, filter, dan laporan yang lebih lengkap.
-
 ## Tentang Project
 
 **Sistem Depot Air Minum – Sistem Penjualan & Penerimaan Kas**

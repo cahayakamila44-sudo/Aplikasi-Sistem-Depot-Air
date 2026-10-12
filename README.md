@@ -182,12 +182,6 @@ erDiagram
     }
 ```
 
-Relasi antar entitas:
-
-- **Pelanggan → Penjualan (1:N)**: satu pelanggan dapat memiliki banyak transaksi penjualan.
-- **Persediaan → Penjualan (1:N)**: satu jenis persediaan dapat digunakan dalam banyak transaksi penjualan.
-- **Penjualan → Penerimaan Kas (1:N)**: satu transaksi penjualan dapat memiliki data penerimaan kas.
-
 ## Struktur Folder
 
 ```

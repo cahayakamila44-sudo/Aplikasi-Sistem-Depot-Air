@@ -6,6 +6,8 @@ Aplikasi menggunakan **HTML, CSS, dan JavaScript** pada frontend serta **Supabas
 
 🔗 **Demo:**
 [https://cahayakamila44-sudo.github.io/Aplikasi-Sistem-Depot-Air/](https://cahayakamila44-sudo.github.io/Aplikasi-Sistem-Depot-Air/)
+Username: cahayakamila77
+Passwoard: 654321
 
 ## Teknologi
 

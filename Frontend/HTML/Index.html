@@ -11,11 +11,56 @@
         href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 
     <!-- CSS -->
-    <link rel="stylesheet" href="../css/style.css">
+    <link rel="stylesheet" href="../CSS/Style.css">
 </head>
 
 <body>
 
+<section id="loginScreen" class="auth-screen" aria-labelledby="loginTitle">
+    <div class="auth-card">
+        <div class="auth-brand">
+            <div class="auth-logo"><i class="fa-solid fa-droplet"></i></div>
+            <span>SISTEM DEPOT AIR MINUM</span>
+        </div>
+        <div class="auth-heading">
+            <p class="auth-eyebrow">SELAMAT DATANG KEMBALI</p>
+            <h1 id="loginTitle">Masuk ke akun Anda</h1>
+            <p>Kelola penjualan dan operasional depot dengan mudah.</p>
+        </div>
+        <form id="loginForm" class="auth-form">
+            <label for="loginUsername">Username</label>
+            <div class="auth-input-wrap">
+                <i class="fa-regular fa-user" aria-hidden="true"></i>
+                <input id="loginUsername" name="username" type="text"
+                    autocomplete="username" placeholder="Masukkan username" required>
+            </div>
+            <label for="loginPassword">Password</label>
+            <div class="auth-input-wrap">
+                <i class="fa-solid fa-lock" aria-hidden="true"></i>
+                <input id="loginPassword" name="password" type="password"
+                    autocomplete="current-password" placeholder="Masukkan password" required>
+                <button id="togglePassword" class="password-toggle" type="button"
+                    aria-label="Tampilkan password" aria-pressed="false">
+                    <i class="fa-regular fa-eye" aria-hidden="true"></i>
+                </button>
+            </div>
+            <p id="loginMessage" class="auth-message" role="alert" aria-live="polite"></p>
+            <button id="loginSubmit" class="auth-submit" type="submit">
+                <span>Masuk ke Aplikasi</span>
+                <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
+            </button>
+        </form>
+        <div class="auth-footer">
+            <i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
+            Login diamankan dengan Supabase Auth
+        </div>
+        <p class="auth-account-note">Akun login harus dibuat terlebih dahulu di Supabase Auth.</p>
+    </div>
+    <div class="auth-decoration auth-decoration-one"></div>
+    <div class="auth-decoration auth-decoration-two"></div>
+</section>
+
+<div id="appShell" class="app-shell hidden">
 <!-- =====================================================
      HEADER
 ===================================================== -->
@@ -28,36 +73,78 @@
             <h1>Sistem Depot Air Minum</h1>
             <p>Sistem Penjualan &amp; Penerimaan Kas</p>
         </div>
+        <button id="logoutButton" class="logout-button" type="button">
+            <i class="fa-solid fa-arrow-right-from-bracket" aria-hidden="true"></i>
+            Keluar
+        </button>
     </div>
 </header>
 
 
 <!-- =====================================================
-     NAVBAR
+     SIDEBAR NAVIGATION
 ===================================================== -->
-<nav class="navbar">
-    <div class="container nav-container">
+<nav class="navbar sidebar" id="appSidebar" aria-label="Navigasi utama">
+    <div class="sidebar-brand">
+        <div class="sidebar-logo"><i class="fa-solid fa-droplet"></i></div>
+        <div>
+            <strong>Depot Air</strong>
+            <span>Sistem Informasi</span>
+        </div>
+    </div>
 
-        <button class="menu-button active" data-page="dashboard">
-            <i class="fa-solid fa-chart-line"></i>
-            <span>Dashboard</span>
-        </button>
+    <div class="nav-container">
+        <div class="nav-group">
+            <p class="nav-group-title">MENU UTAMA</p>
 
-        <button class="menu-button" data-page="penjualan">
-            <i class="fa-solid fa-cart-shopping"></i>
-            <span>Penjualan</span>
-        </button>
+            <button class="menu-button active" data-page="dashboard">
+                <i class="fa-solid fa-chart-line"></i>
+                <span>Dashboard</span>
+            </button>
 
-        <button class="menu-button" data-page="penerimaan">
-            <i class="fa-solid fa-money-bill-wave"></i>
-            <span>Penerimaan Kas</span>
-        </button>
+            <button class="menu-button" data-page="master">
+                <i class="fa-solid fa-address-book"></i>
+                <span>Master Data</span>
+            </button>
+        </div>
 
-        <button class="menu-button" data-page="persediaan">
-            <i class="fa-solid fa-boxes-stacked"></i>
-            <span>Persediaan</span>
-        </button>
+        <div class="nav-group">
+            <p class="nav-group-title">TRANSAKSI</p>
 
+            <button class="menu-button" data-page="penjualan">
+                <i class="fa-solid fa-cart-shopping"></i>
+                <span>Penjualan</span>
+            </button>
+
+            <button class="menu-button" data-page="piutang">
+                <i class="fa-solid fa-file-invoice-dollar"></i>
+                <span>Piutang</span>
+            </button>
+
+            <button class="menu-button" data-page="penyerahan">
+                <i class="fa-solid fa-truck"></i>
+                <span>Penyerahan Barang</span>
+            </button>
+
+            <button class="menu-button" data-page="penerimaan">
+                <i class="fa-solid fa-money-bill-wave"></i>
+                <span>Penerimaan Kas</span>
+            </button>
+        </div>
+
+        <div class="nav-group">
+            <p class="nav-group-title">DATA &amp; LAPORAN</p>
+
+            <button class="menu-button" data-page="persediaan">
+                <i class="fa-solid fa-boxes-stacked"></i>
+                <span>Persediaan</span>
+            </button>
+
+            <button class="menu-button" data-page="laporan">
+                <i class="fa-solid fa-chart-column"></i>
+                <span>Laporan</span>
+            </button>
+        </div>
     </div>
 </nav>
 
@@ -135,6 +222,44 @@
         </div>
     </section>
 
+    <section id="master" class="page hidden">
+        <div class="page-title">
+            <div>
+                <h2><i class="fa-solid fa-address-book"></i> Master Data</h2>
+                <p>Kelola pelanggan dan data produk pada menu Persediaan</p>
+            </div>
+            <i class="fa-solid fa-address-book page-icon"></i>
+        </div>
+
+        <div class="form-card">
+            <h3><i class="fa-solid fa-user-plus"></i> Tambah Pelanggan</h3>
+            <form id="formPelanggan">
+                <label for="namaPelanggan">Nama Pelanggan</label>
+                <input type="text" id="namaPelanggan" maxlength="100" required>
+                <label for="noHp">No. HP</label>
+                <input type="tel" id="noHp" maxlength="20">
+                <label for="alamat">Alamat</label>
+                <textarea id="alamat"></textarea>
+                <button type="submit" class="btn-primary">
+                    <i class="fa-solid fa-save"></i> Simpan Pelanggan
+                </button>
+            </form>
+        </div>
+
+        <div class="table-card">
+            <h3><i class="fa-solid fa-users"></i> Data Pelanggan</h3>
+            <table>
+                <thead>
+                    <tr><th>No</th><th>Nama</th><th>No. HP</th><th>Alamat</th><th>Aksi</th></tr>
+                </thead>
+                <tbody id="tabelPelanggan">
+                    <tr><td colspan="5" class="empty-data">Belum ada data pelanggan</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <p class="module-note">Katalog produk dan harga satuan dikelola melalui menu Persediaan.</p>
+    </section>
+
 
     <!-- =================================================
          PENJUALAN
@@ -160,17 +285,10 @@
 
             <form id="formPenjualan">
 
-                <label for="namaPelangganPenjualan">Nama Pelanggan</label>
-                <input type="text" id="namaPelangganPenjualan"
-                    placeholder="Masukkan nama pelanggan" required>
-
-                <label for="noHpPenjualan">No. HP</label>
-                <input type="text" id="noHpPenjualan"
-                    placeholder="Contoh: 081234567890">
-
-                <label for="alamatPenjualan">Alamat</label>
-                <textarea id="alamatPenjualan"
-                    placeholder="Masukkan alamat pelanggan"></textarea>
+                <label for="pelangganPenjualan">Pelanggan</label>
+                <select id="pelangganPenjualan" required>
+                    <option value="">Pilih pelanggan dari Master Data</option>
+                </select>
 
                 <label for="persediaanPenjualan">Barang / Persediaan</label>
                 <select id="persediaanPenjualan" required>
@@ -188,6 +306,13 @@
                 <input type="number" id="hargaPerGalon" min="0"
                     placeholder="Harga otomatis dari persediaan" readonly>
 
+                <label for="jenisPembayaranPenjualan">Jenis Pembayaran</label>
+                <select id="jenisPembayaranPenjualan" required>
+                    <option value="" selected disabled>Pilih jenis pembayaran</option>
+                    <option value="Tunai">Tunai (langsung lunas)</option>
+                    <option value="Kredit">Kredit (dibayar kemudian)</option>
+                </select>
+
                 <button type="submit" class="btn-primary">
                     <i class="fa-solid fa-save"></i>
                     Simpan Penjualan
@@ -204,25 +329,78 @@
             <table>
                 <thead>
                     <tr>
-                        <th>No</th>
+                        <th>ID Penjualan</th>
                         <th>Tanggal</th>
                         <th>Pelanggan</th>
                         <th>Barang</th>
                         <th>Jumlah</th>
                         <th>Harga/Galon</th>
                         <th>Total</th>
+                        <th>Jenis Pembayaran</th>
                         <th>Status</th>
                         <th>Aksi</th>
                     </tr>
                 </thead>
                 <tbody id="tabelPenjualan">
                     <tr>
-                        <td colspan="9" class="empty-data">
+                        <td colspan="10" class="empty-data">
                             <i class="fa-solid fa-cart-shopping"></i><br>
                             Belum ada data penjualan
                         </td>
                     </tr>
                 </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section id="penyerahan" class="page hidden">
+        <div class="page-title">
+            <div>
+                <h2><i class="fa-solid fa-truck"></i> Penyerahan Barang</h2>
+                <p>Pantau penyerahan barang dan status pelunasan setiap transaksi</p>
+            </div>
+            <i class="fa-solid fa-truck page-icon"></i>
+        </div>
+        <div class="table-card">
+            <h3><i class="fa-solid fa-box"></i> Daftar Penyerahan</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>No</th>
+                        <th>Tanggal</th>
+                        <th>Pelanggan</th>
+                        <th>Barang</th>
+                        <th>Jumlah</th>
+                        <th>Total</th>
+                        <th>Pembayaran</th>
+                        <th>Penyerahan</th>
+                        <th>Aksi</th>
+                    </tr>
+                </thead>
+                <tbody id="tabelPenyerahan">
+                    <tr><td colspan="9" class="empty-data">Belum ada data penjualan</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section id="piutang" class="page hidden">
+        <div class="page-title">
+            <div>
+                <h2><i class="fa-solid fa-file-invoice-dollar"></i> Piutang Usaha</h2>
+                <p>Saldo dihitung dari nilai penjualan dikurangi seluruh pelunasannya</p>
+            </div>
+            <i class="fa-solid fa-file-invoice-dollar page-icon"></i>
+        </div>
+        <div class="dashboard-grid report-summary">
+            <div class="dashboard-card"><div><h3>Total Saldo Piutang</h3><p id="totalSaldoPiutang">Rp 0</p></div></div>
+            <div class="dashboard-card"><div><h3>Transaksi Belum Lunas</h3><p id="jumlahPiutang">0</p></div></div>
+        </div>
+        <div class="table-card">
+            <h3><i class="fa-solid fa-clock"></i> Kartu Piutang &amp; Umur Tagihan</h3>
+            <table>
+                <thead><tr><th>No</th><th>Pelanggan</th><th>Tanggal</th><th>Umur</th><th>Total</th><th>Dibayar</th><th>Sisa Piutang</th></tr></thead>
+                <tbody id="tabelPiutang"><tr><td colspan="7" class="empty-data">Belum ada piutang</td></tr></tbody>
             </table>
         </div>
     </section>
@@ -261,12 +439,12 @@
                 <input type="date" id="tanggalPenerimaan" required>
 
                 <label for="jumlahDiterima">Jumlah Diterima</label>
-                <input type="number" id="jumlahDiterima" min="1"
-                    placeholder="Jumlah otomatis dari transaksi" readonly>
+                <input type="number" id="jumlahDiterima" min="0.01" step="0.01"
+                    placeholder="Masukkan jumlah pembayaran" required>
 
                 <label for="metodePembayaran">Metode Pembayaran</label>
                 <select id="metodePembayaran" required>
-                    <option value="">Pilih Metode</option>
+                    <option value="" selected disabled>Pilih Metode</option>
                     <option value="Tunai">Tunai</option>
                     <option value="Transfer">Transfer</option>
                     <option value="QRIS">QRIS</option>
@@ -288,9 +466,10 @@
             <table>
                 <thead>
                     <tr>
-                        <th>No</th>
+                        <th>ID Penerimaan</th>
                         <th>Tanggal</th>
                         <th>ID Penjualan</th>
+                        <th>Nama Pelanggan</th>
                         <th>Jumlah Diterima</th>
                         <th>Metode</th>
                         <th>Aksi</th>
@@ -298,12 +477,60 @@
                 </thead>
                 <tbody id="tabelPenerimaan">
                     <tr>
-                        <td colspan="6" class="empty-data">
+                        <td colspan="7" class="empty-data">
                             <i class="fa-solid fa-money-bill-wave"></i><br>
                             Belum ada data penerimaan kas
                         </td>
                     </tr>
                 </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section id="laporan" class="page hidden">
+        <div class="page-title">
+            <div>
+                <h2><i class="fa-solid fa-chart-column"></i> Laporan Terpadu</h2>
+                <p>Ringkasan penjualan, penerimaan kas, persediaan, dan saldo piutang</p>
+            </div>
+            <i class="fa-solid fa-chart-column page-icon"></i>
+        </div>
+        <div class="form-card report-filter">
+            <label for="laporanMulai">Dari tanggal</label>
+            <input type="date" id="laporanMulai">
+            <label for="laporanSampai">Sampai tanggal</label>
+            <input type="date" id="laporanSampai">
+            <button type="button" class="btn-primary" id="btnTerapkanLaporan">
+                <i class="fa-solid fa-filter"></i> Terapkan Periode
+            </button>
+            <button type="button" class="btn-secondary" id="btnCetakLaporan">
+                <i class="fa-solid fa-print"></i> Cetak
+            </button>
+        </div>
+        <div class="dashboard-grid report-summary">
+            <div class="dashboard-card"><div><h3>Penjualan</h3><p id="laporanTotalPenjualan">Rp 0</p></div></div>
+            <div class="dashboard-card"><div><h3>Penerimaan Kas</h3><p id="laporanTotalPenerimaan">Rp 0</p></div></div>
+            <div class="dashboard-card"><div><h3>Saldo Piutang</h3><p id="laporanSaldoPiutang">Rp 0</p></div></div>
+        </div>
+        <div class="table-card">
+            <h3><i class="fa-solid fa-cart-shopping"></i> Rincian Penjualan Periode</h3>
+            <table>
+                <thead><tr><th>Tanggal</th><th>Pelanggan</th><th>Produk</th><th>Jumlah</th><th>Total</th><th>Dibayar</th><th>Sisa</th></tr></thead>
+                <tbody id="tabelLaporanPenjualan"><tr><td colspan="7" class="empty-data">Pilih periode laporan</td></tr></tbody>
+            </table>
+        </div>
+        <div class="table-card report-card">
+            <h3><i class="fa-solid fa-money-bill-wave"></i> Rincian Penerimaan Kas</h3>
+            <table>
+                <thead><tr><th>Tanggal</th><th>ID Penjualan</th><th>Nama Pelanggan</th><th>Jumlah</th><th>Metode</th></tr></thead>
+                <tbody id="tabelLaporanPenerimaan"><tr><td colspan="5" class="empty-data">Pilih periode laporan</td></tr></tbody>
+            </table>
+        </div>
+        <div class="table-card report-card">
+            <h3><i class="fa-solid fa-boxes-stacked"></i> Posisi Persediaan</h3>
+            <table>
+                <thead><tr><th>Produk</th><th>Stok tersedia</th><th>Satuan</th><th>Harga satuan</th></tr></thead>
+                <tbody id="tabelLaporanPersediaan"><tr><td colspan="4" class="empty-data">Belum ada data persediaan</td></tr></tbody>
             </table>
         </div>
     </section>
@@ -386,6 +613,7 @@
     </section>
 
 </main>
+</div>
 
 
 <!-- =====================================================
@@ -396,10 +624,10 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
 <!-- 2. Config -->
-<script src="../js/config.js"></script>
+<script src="../JS/Config.js"></script>
 
 <!-- 3. Apps -->
-<script src="../js/apps.js"></script>
+<script src="../JS/apps.js"></script>
 
 </body>
 </html>

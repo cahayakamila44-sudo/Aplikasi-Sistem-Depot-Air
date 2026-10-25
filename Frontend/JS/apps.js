@@ -74,6 +74,23 @@ const Utils = {
             return null;
         }
     },
+    async fetchAll(queryFactory, label) {
+        const pageSize = 1000;
+        const rows = [];
+        let offset = 0;
+
+        while (true) {
+            const page = await this.guard(
+                queryFactory().range(offset, offset + pageSize - 1),
+                label
+            );
+            if (page === null) return null;
+
+            rows.push(...page);
+            if (page.length < pageSize) return rows;
+            offset += pageSize;
+        }
+    },
     escape(str) {
         if (str == null) return "";
         return String(str)
@@ -93,7 +110,9 @@ const App = {
         pelanggan: [],
         persediaan: [],
         penjualan: [],
-        penerimaan: []
+        penerimaan: [],
+        piutang: [],
+        penyerahan: []
     },
 
     // ---------------------------------------------
@@ -157,6 +176,10 @@ const App = {
             const el = document.getElementById(id);
             if (el) el.value = t;
         });
+        const start = document.getElementById("laporanMulai");
+        const end = document.getElementById("laporanSampai");
+        if (start) start.value = `${t.slice(0, 7)}-01`;
+        if (end) end.value = t;
     },
 
     setupRealtime() {
@@ -183,6 +206,7 @@ const App = {
                 await this.loadPersediaan();
                 this.fillSelects();
                 this.updateDashboard();
+                this.renderLaporan();
             }
         );
 
@@ -198,6 +222,7 @@ const App = {
                 await this.loadPersediaan();
                 this.fillSelects();
                 this.updateDashboard();
+                this.renderLaporan();
             }
         );
 
@@ -213,6 +238,7 @@ const App = {
                 await this.loadPersediaan();
                 this.fillSelects();
                 this.updateDashboard();
+                this.renderLaporan();
             }
         );
 
@@ -231,6 +257,14 @@ const App = {
     // BIND FORMS
     // ---------------------------------------------
     bindForms() {
+        const formPelanggan = document.getElementById("formPelanggan");
+        if (formPelanggan) {
+            formPelanggan.addEventListener("submit", async (e) => {
+                e.preventDefault();
+                await this.simpanPelanggan();
+            });
+        }
+
         const formPersediaan = document.getElementById("formPersediaan");
         if (formPersediaan) {
             formPersediaan.addEventListener("submit", async (e) => {
@@ -254,6 +288,13 @@ const App = {
                 await this.simpanPenerimaan();
             });
         }
+
+        document.getElementById("btnTerapkanLaporan")?.addEventListener("click", () => {
+            this.renderLaporan();
+        });
+        document.getElementById("btnCetakLaporan")?.addEventListener("click", () => {
+            window.print();
+        });
     },
 
     // ---------------------------------------------
@@ -264,10 +305,14 @@ const App = {
             this.loadPelanggan(),
             this.loadPersediaan(),
             this.loadPenjualan(),
-            this.loadPenerimaan()
+            this.loadPenerimaan(),
+            this.loadPiutang(),
+            this.loadPenyerahan()
         ]);
+        this.renderPenjualan();
         this.updateDashboard();
         this.fillSelects();
+        this.renderLaporan();
     },
 
     // =============================================
@@ -275,8 +320,8 @@ const App = {
     // =============================================
     async loadPelanggan() {
         console.log("[App] loadPelanggan() ...");
-        const data = await Utils.guard(
-            sb.from(CONFIG.TABLES.PELANGGAN)
+        const data = await Utils.fetchAll(
+            () => sb.from(CONFIG.TABLES.PELANGGAN)
               .select("*")
               .order("id_pelanggan", { ascending: true }),
             "memuat pelanggan"
@@ -311,9 +356,9 @@ const App = {
             return;
         }
 
-        tbody.innerHTML = this.cache.pelanggan.map((p, i) => `
+        tbody.innerHTML = this.cache.pelanggan.map(p => `
             <tr>
-                <td>${i + 1}</td>
+                <td>${p.id_pelanggan}</td>
                 <td>${Utils.escape(p.nama_pelanggan)}</td>
                 <td>${Utils.escape(p.no_hp) || "-"}</td>
                 <td>${Utils.escape(p.alamat) || "-"}</td>
@@ -331,7 +376,6 @@ const App = {
         const nama = document.getElementById("namaPelanggan").value.trim();
         const no_hp = document.getElementById("noHp").value.trim();
         const alamat = document.getElementById("alamat").value.trim();
-
         if (!nama) return alert("Nama pelanggan wajib diisi.");
 
         const result = await Utils.guard(
@@ -346,6 +390,7 @@ const App = {
         await this.loadPelanggan();
         this.fillSelects();
         this.updateDashboard();
+        this.renderLaporan();
         alert("Pelanggan berhasil disimpan.");
     },
 
@@ -367,8 +412,8 @@ const App = {
     // =============================================
     async loadPersediaan() {
         console.log("[App] loadPersediaan() ...");
-        const data = await Utils.guard(
-            sb.from(CONFIG.TABLES.PERSEDIAAN)
+        const data = await Utils.fetchAll(
+            () => sb.from(CONFIG.TABLES.PERSEDIAAN)
               .select("*")
               .order("id_persediaan", { ascending: true }),
             "memuat persediaan"
@@ -377,7 +422,7 @@ const App = {
             const tbody = document.getElementById("tabelPersediaan");
             if (tbody) {
                 tbody.innerHTML = `
-                    <tr><td colspan="6" class="empty-data">
+                    <tr><td colspan="7" class="empty-data">
                         <i class="fa-solid fa-triangle-exclamation"></i><br>
                         Gagal memuat data. Cek Console (F12).
                     </td></tr>`;
@@ -446,19 +491,6 @@ const App = {
         }).join("");
     },
 
-    async hasPersediaanHargaColumn() {
-        try {
-            const { error } = await sb
-                .from(CONFIG.TABLES.PERSEDIAAN)
-                .select("harga")
-                .limit(1);
-
-            return !error;
-        } catch {
-            return false;
-        }
-    },
-
     async simpanHargaPersediaan(id) {
         const input = document.querySelector(`input[data-role="harga-persediaan"][data-id="${id}"]`);
         if (!input) return;
@@ -466,12 +498,6 @@ const App = {
         const harga = Number(input.value);
         if (input.value.trim() === "" || !Number.isFinite(harga) || harga < 0) {
             alert("Harga tidak valid.");
-            return;
-        }
-
-        const hasHarga = await this.hasPersediaanHargaColumn();
-        if (!hasHarga) {
-            alert("Kolom harga belum tersedia di tabel persediaan. Jalankan SQL untuk menambah kolom harga.");
             return;
         }
 
@@ -504,11 +530,10 @@ const App = {
         const hargaInput = document.getElementById("hargaPersediaan");
         const harga = hargaInput ? parseFloat(hargaInput.value) : NaN;
         const satuan = document.getElementById("satuan").value.trim() || "Galon";
-        const hasHarga = await this.hasPersediaanHargaColumn();
 
         if (!nama_barang) return alert("Nama barang wajib diisi.");
         if (isNaN(stok) || stok < 0) return alert("Stok tidak valid.");
-        if (hasHarga && hargaInput && (isNaN(harga) || harga < 0)) {
+        if (!hargaInput || !Number.isFinite(harga) || harga < 0) {
             return alert("Harga per galon tidak valid.");
         }
 
@@ -519,6 +544,7 @@ const App = {
               .limit(1),
             "cek persediaan yang sudah ada"
         );
+        if (existing === null) return;
 
         const payloadBase = {
             satuan,
@@ -530,12 +556,9 @@ const App = {
             const stokBaru = Number(item.stok || 0) + stok;
             const payload = {
                 ...payloadBase,
-                stok: stokBaru
+                stok: stokBaru,
+                harga
             };
-
-            if (hasHarga && hargaInput) {
-                payload.harga = harga;
-            }
 
             const result = await Utils.guard(
                 sb.from(CONFIG.TABLES.PERSEDIAAN)
@@ -556,10 +579,7 @@ const App = {
             return;
         }
 
-        const insertPayload = { nama_barang, stok, satuan };
-        if (hasHarga && hargaInput) {
-            insertPayload.harga = harga;
-        }
+        const insertPayload = { nama_barang, stok, satuan, harga };
 
         const result = await Utils.guard(
             sb.from(CONFIG.TABLES.PERSEDIAAN)
@@ -596,8 +616,8 @@ const App = {
     // =============================================
     async loadPenjualan() {
         console.log("[App] loadPenjualan() ...");
-        const data = await Utils.guard(
-            sb.from(CONFIG.TABLES.PENJUALAN)
+        const data = await Utils.fetchAll(
+            () => sb.from(CONFIG.TABLES.PENJUALAN)
               .select(`
                 id_penjualan,
                 tanggal_penjualan,
@@ -605,19 +625,21 @@ const App = {
                 harga_per_galon,
                 total_penjualan,
                 status_pembayaran,
+                jenis_pembayaran,
+                status_penyerahan,
                 id_pelanggan,
                 id_persediaan,
                 pelanggan ( nama_pelanggan ),
                 persediaan ( nama_barang )
               `)
-              .order("id_penjualan", { ascending: false }),
+              .order("id_penjualan", { ascending: true }),
             "memuat penjualan"
         );
         if (data === null) {
             const tbody = document.getElementById("tabelPenjualan");
             if (tbody) {
                 tbody.innerHTML = `
-                    <tr><td colspan="9" class="empty-data">
+                    <tr><td colspan="10" class="empty-data">
                         <i class="fa-solid fa-triangle-exclamation"></i><br>
                         Gagal memuat data. Cek Console (F12).
                     </td></tr>`;
@@ -635,27 +657,30 @@ const App = {
 
         if (!this.cache.penjualan.length) {
             tbody.innerHTML = `
-                <tr><td colspan="9" class="empty-data">
+                <tr><td colspan="10" class="empty-data">
                     <i class="fa-solid fa-cart-shopping"></i><br>
                     Belum ada data penjualan
                 </td></tr>`;
             return;
         }
 
-        tbody.innerHTML = this.cache.penjualan.map((p, i) => {
-            const lunas = p.status_pembayaran === "Lunas";
-            const statusCls = lunas ? "status-lunas" : "status-belum";
+        tbody.innerHTML = this.cache.penjualan.map(p => {
+            const paid = this.paidAmount(p.id_penjualan);
+            const balance = Math.max(0, Number(p.total_penjualan || 0) - paid);
+            const status = balance === 0 ? "Lunas" : (paid > 0 ? "Sebagian" : "Belum Lunas");
+            const statusCls = balance === 0 ? "status-lunas" : "status-belum";
             return `
                 <tr>
-                    <td>${i + 1}</td>
+                    <td>${p.id_penjualan}</td>
                     <td>${Utils.tanggal(p.tanggal_penjualan)}</td>
                     <td>${Utils.escape(p.pelanggan?.nama_pelanggan) || "-"}</td>
                     <td>${Utils.escape(p.persediaan?.nama_barang) || "-"}</td>
                     <td>${p.jumlah_galon}</td>
                     <td>${Utils.rupiah(p.harga_per_galon)}</td>
                     <td>${Utils.rupiah(p.total_penjualan)}</td>
+                    <td>${Utils.escape(p.jenis_pembayaran || "Kredit")}</td>
                     <td><span class="status ${statusCls}">
-                        ${p.status_pembayaran}
+                        ${status}
                     </span></td>
                     <td>
                         <button class="btn-delete"
@@ -667,10 +692,86 @@ const App = {
         }).join("");
     },
 
+    renderPenyerahan() {
+        const tbody = document.getElementById("tabelPenyerahan");
+        if (!tbody) return;
+        if (!this.cache.penyerahan.length) {
+            tbody.innerHTML = `<tr><td colspan="9" class="empty-data">Belum ada data penjualan</td></tr>`;
+            return;
+        }
+
+        tbody.innerHTML = this.cache.penyerahan.map((sale, index) => {
+            const isPaid = Number(sale.sisa_piutang || 0) <= 0;
+            const isDelivered = sale.status_penyerahan === "Sudah Sampai";
+            const paymentStatus = sale.status_pembayaran;
+            const paymentClass = isPaid ? "status-lunas" : "status-belum";
+            const deliveryStatus = isDelivered
+                ? (isPaid ? "Sudah Sampai" : "Sudah Sampai — Harus Lunas")
+                : "Belum Diserahkan";
+            const deliveryClass = isDelivered && isPaid ? "status-lunas" : "status-belum";
+            const action = isDelivered
+                ? "Tercatat"
+                : `<button class="btn-primary btn-delivery"
+                    onclick="App.tandaiBarangSampai(${sale.id_penjualan})">
+                    <i class="fa-solid fa-truck"></i>
+                    ${isPaid ? "Tandai Sudah Sampai" : "Sudah Sampai — Harus Lunas"}
+                </button>`;
+
+            return `<tr>
+                <td>${index + 1}</td>
+                <td>${Utils.tanggal(sale.tanggal_penjualan)}</td>
+                <td>${Utils.escape(sale.nama_pelanggan) || "-"}</td>
+                <td>${Utils.escape(sale.nama_barang) || "-"}</td>
+                <td>${sale.jumlah_galon}</td>
+                <td>${Utils.rupiah(sale.total_penjualan)}</td>
+                <td><span class="status ${paymentClass}">${paymentStatus}</span></td>
+                <td><span class="status ${deliveryClass}">${deliveryStatus}</span></td>
+                <td>${action}</td>
+            </tr>`;
+        }).join("");
+    },
+
+    async loadPenyerahan() {
+        const data = await Utils.fetchAll(
+            () => sb.from(CONFIG.VIEWS.PENYERAHAN)
+              .select("*")
+              .order("id_penjualan", { ascending: false }),
+            "memuat penyerahan barang"
+        );
+        if (data === null) return;
+        this.cache.penyerahan = data;
+        this.renderPenyerahan();
+    },
+
+    async tandaiBarangSampai(idPenjualan) {
+        const result = await Utils.guard(
+            sb.from(CONFIG.TABLES.PENJUALAN)
+              .update({ status_penyerahan: "Sudah Sampai" })
+              .eq("id_penjualan", idPenjualan)
+              .eq("status_penyerahan", "Belum Diserahkan")
+              .select("id_penjualan"),
+            "mencatat penyerahan barang"
+        );
+        if (result === null) return;
+        if (!result.length) {
+            alert("Penyerahan ini sudah dicatat atau transaksi tidak ditemukan.");
+            return;
+        }
+
+        await this.loadPenjualan();
+        await this.loadPenyerahan();
+        const sale = this.cache.penyerahan.find(
+            item => Number(item.id_penjualan) === Number(idPenjualan)
+        );
+        if (sale && Number(sale.sisa_piutang || 0) > 0) {
+            alert("Barang sudah dicatat sampai. Transaksi masih belum lunas dan harus ditagih.");
+        }
+    },
+
     async simpanPenjualan() {
-        const nama = document.getElementById("namaPelangganPenjualan").value.trim();
-        const no_hp = document.getElementById("noHpPenjualan").value.trim();
-        const alamat = document.getElementById("alamatPenjualan").value.trim();
+        const id_pelanggan = parseInt(
+            document.getElementById("pelangganPenjualan").value, 10
+        );
         const id_persediaan = parseInt(
             document.getElementById("persediaanPenjualan").value, 10
         );
@@ -682,24 +783,16 @@ const App = {
         const harga_per_galon = parseFloat(
             document.getElementById("hargaPerGalon").value
         );
+        const jenis_pembayaran = document.getElementById("jenisPembayaranPenjualan").value;
 
-        if (!nama) return alert("Nama pelanggan wajib diisi.");
+        if (!id_pelanggan) return alert("Pelanggan wajib dipilih dari Master Data.");
         if (!id_persediaan) return alert("Persediaan wajib dipilih.");
         if (!jumlah_galon || jumlah_galon <= 0)
             return alert("Jumlah galon tidak valid.");
         if (isNaN(harga_per_galon) || harga_per_galon < 0)
             return alert("Harga per galon tidak valid.");
-
-        const pelangganInsert = await Utils.guard(
-            sb.from(CONFIG.TABLES.PELANGGAN)
-              .insert({ nama_pelanggan: nama, no_hp, alamat })
-              .select(),
-            "menyimpan pelanggan dari penjualan"
-        );
-
-        if (!pelangganInsert || !pelangganInsert.length) return;
-
-        const id_pelanggan = pelangganInsert[0].id_pelanggan;
+        if (!["Tunai", "Kredit"].includes(jenis_pembayaran))
+            return alert("Pilih jenis pembayaran tunai atau kredit.");
 
         const result = await Utils.guard(
             sb.from(CONFIG.TABLES.PENJUALAN).insert({
@@ -708,22 +801,22 @@ const App = {
                 tanggal_penjualan,
                 jumlah_galon,
                 harga_per_galon,
-                status_pembayaran: "Belum Lunas"
+                jenis_pembayaran
             }).select(),
             "menyimpan penjualan"
         );
         if (!result) return;
 
         document.getElementById("formPenjualan").reset();
-        document.getElementById("namaPelangganPenjualan").value = "";
-        document.getElementById("noHpPenjualan").value = "";
-        document.getElementById("alamatPenjualan").value = "";
         this.setDefaultDates();
 
         await this.loadPenjualan();
+        await this.loadPenerimaan();
         await this.loadPersediaan();
+        await Promise.all([this.loadPiutang(), this.loadPenyerahan()]);
         this.fillSelects();
         this.updateDashboard();
+        this.renderLaporan();
         alert("Penjualan berhasil disimpan.");
     },
 
@@ -736,9 +829,11 @@ const App = {
         );
         if (ok === null) return;
         await this.loadPenjualan();
+        await Promise.all([this.loadPiutang(), this.loadPenyerahan()]);
         await this.loadPersediaan();
         this.fillSelects();
         this.updateDashboard();
+        this.renderLaporan();
     },
 
     // =============================================
@@ -746,23 +841,24 @@ const App = {
     // =============================================
     async loadPenerimaan() {
         console.log("[App] loadPenerimaan() ...");
-        const data = await Utils.guard(
-            sb.from(CONFIG.TABLES.PENERIMAAN)
+        const data = await Utils.fetchAll(
+            () => sb.from(CONFIG.TABLES.PENERIMAAN)
               .select(`
                 id_penerimaan,
                 id_penjualan,
                 tanggal_penerimaan,
                 jumlah_diterima,
-                metode_pembayaran
+                metode_pembayaran,
+                penjualan ( pelanggan ( nama_pelanggan ) )
               `)
-              .order("id_penerimaan", { ascending: false }),
+              .order("id_penerimaan", { ascending: true }),
             "memuat penerimaan"
         );
         if (data === null) {
             const tbody = document.getElementById("tabelPenerimaan");
             if (tbody) {
                 tbody.innerHTML = `
-                    <tr><td colspan="6" class="empty-data">
+                    <tr><td colspan="7" class="empty-data">
                         <i class="fa-solid fa-triangle-exclamation"></i><br>
                         Gagal memuat data. Cek Console (F12).
                     </td></tr>`;
@@ -772,6 +868,7 @@ const App = {
         this.cache.penerimaan = data || [];
         console.log(`[App] penerimaan: ${this.cache.penerimaan.length} baris`);
         this.renderPenerimaan();
+        this.renderPenjualan();
     },
 
     renderPenerimaan() {
@@ -780,18 +877,19 @@ const App = {
 
         if (!this.cache.penerimaan.length) {
             tbody.innerHTML = `
-                <tr><td colspan="6" class="empty-data">
+                <tr><td colspan="7" class="empty-data">
                     <i class="fa-solid fa-money-bill-wave"></i><br>
                     Belum ada data penerimaan kas
                 </td></tr>`;
             return;
         }
 
-        tbody.innerHTML = this.cache.penerimaan.map((p, i) => `
+        tbody.innerHTML = this.cache.penerimaan.map(p => `
             <tr>
-                <td>${i + 1}</td>
+                <td>${p.id_penerimaan}</td>
                 <td>${Utils.tanggal(p.tanggal_penerimaan)}</td>
                 <td>#${p.id_penjualan}</td>
+                <td>${Utils.escape(p.penjualan?.pelanggan?.nama_pelanggan) || "-"}</td>
                 <td>${Utils.rupiah(p.jumlah_diterima)}</td>
                 <td>${Utils.escape(p.metode_pembayaran)}</td>
                 <td>
@@ -817,35 +915,41 @@ const App = {
             document.getElementById("metodePembayaran").value;
 
         if (!id_penjualan) return alert("Transaksi penjualan wajib dipilih.");
-        if (isNaN(jumlah_diterima) || jumlah_diterima <= 0)
+        if (!Number.isFinite(jumlah_diterima) || jumlah_diterima <= 0)
             return alert("Jumlah diterima tidak valid.");
-        if (!metode_pembayaran) return alert("Metode pembayaran wajib dipilih.");
+        if (!["Tunai", "Transfer", "QRIS"].includes(metode_pembayaran))
+            return alert("Pilih metode pembayaran Tunai, Transfer, atau QRIS.");
+        const piutang = this.cache.piutang.find(
+            row => Number(row.id_penjualan) === id_penjualan
+        );
+        const sisa = Number(piutang?.sisa_piutang || 0);
+        if (!piutang) {
+            return alert("Piutang tidak ditemukan atau sudah lunas. Muat ulang data lalu coba lagi.");
+        }
+        if (jumlah_diterima > sisa) {
+            return alert(`Pembayaran tidak boleh melebihi sisa piutang ${Utils.rupiah(sisa)}.`);
+        }
 
         const result = await Utils.guard(
-            sb.from(CONFIG.TABLES.PENERIMAAN).insert({
-                id_penjualan,
-                tanggal_penerimaan,
-                jumlah_diterima,
-                metode_pembayaran
-            }).select(),
+            sb.rpc("fn_catat_penerimaan", {
+                p_id_penjualan: id_penjualan,
+                p_tanggal_penerimaan: tanggal_penerimaan,
+                p_jumlah_diterima: jumlah_diterima,
+                p_metode_pembayaran: metode_pembayaran
+            }),
             "menyimpan penerimaan"
         );
-        if (!result) return;
+        if (result === null) return;
 
         document.getElementById("formPenerimaan").reset();
         this.setDefaultDates();
 
-        await Utils.guard(
-            sb.from(CONFIG.TABLES.PENJUALAN)
-              .update({ status_pembayaran: "Lunas" })
-              .eq("id_penjualan", id_penjualan),
-            "update status penjualan"
-        );
-
         await this.loadPenerimaan();
         await this.loadPenjualan();
+        await Promise.all([this.loadPiutang(), this.loadPenyerahan()]);
         this.fillSelects();
         this.updateDashboard();
+        this.renderLaporan();
         alert("Penerimaan kas berhasil disimpan.");
     },
 
@@ -858,13 +962,160 @@ const App = {
         );
         if (ok === null) return;
         await this.loadPenerimaan();
+        await this.loadPenjualan();
+        await Promise.all([this.loadPiutang(), this.loadPenyerahan()]);
+        this.fillSelects();
         this.updateDashboard();
+        this.renderLaporan();
+    },
+
+    paidAmount(idPenjualan) {
+        return this.cache.penerimaan
+            .filter(p => Number(p.id_penjualan) === Number(idPenjualan))
+            .reduce((total, p) => total + Number(p.jumlah_diterima || 0), 0);
+    },
+
+    // =============================================
+    // PIUTANG
+    // =============================================
+    async loadPiutang() {
+        const data = await Utils.fetchAll(
+            () => sb.from(CONFIG.VIEWS.PIUTANG)
+              .select("*")
+              .order("tanggal_penjualan", { ascending: false })
+              .order("id_penjualan", { ascending: false }),
+            "memuat piutang"
+        );
+        if (data === null) return;
+        this.cache.piutang = data;
+        this.renderPiutang();
+    },
+
+    renderPiutang() {
+        const tbody = document.getElementById("tabelPiutang");
+        const set = (id, value) => {
+            const element = document.getElementById(id);
+            if (element) element.textContent = value;
+        };
+
+        set("totalSaldoPiutang", Utils.rupiah(
+            this.cache.piutang.reduce((total, row) => total + Number(row.sisa_piutang || 0), 0)
+        ));
+        set("jumlahPiutang", this.cache.piutang.length);
+        if (!tbody) return;
+        if (!this.cache.piutang.length) {
+            tbody.innerHTML = `<tr><td colspan="7" class="empty-data">Tidak ada piutang yang belum lunas</td></tr>`;
+            return;
+        }
+
+        const today = new Date();
+        const todayUtc = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+        tbody.innerHTML = this.cache.piutang.map((row, index) => {
+            const saleDate = new Date(`${row.tanggal_penjualan}T00:00:00`);
+            const ageDays = Math.max(0, Math.floor(
+                (todayUtc - Date.UTC(saleDate.getFullYear(), saleDate.getMonth(), saleDate.getDate())) / 86400000
+            ));
+            const ageBucket = ageDays <= 30 ? "0–30 hari" : (ageDays <= 60 ? "31–60 hari" : ">60 hari");
+            return `<tr>
+                <td>${index + 1}</td>
+                <td>${Utils.escape(row.nama_pelanggan) || "-"}</td>
+                <td>${Utils.tanggal(row.tanggal_penjualan)}</td>
+                <td>${ageDays} hari (${ageBucket})</td>
+                <td>${Utils.rupiah(row.total_penjualan)}</td>
+                <td>${Utils.rupiah(row.total_dibayar)}</td>
+                <td>${Utils.rupiah(row.sisa_piutang)}</td>
+            </tr>`;
+        }).join("");
+    },
+
+    // =============================================
+    // LAPORAN
+    // =============================================
+    renderLaporan() {
+        const mulai = document.getElementById("laporanMulai")?.value || "";
+        const sampai = document.getElementById("laporanSampai")?.value || "";
+        if (mulai && sampai && mulai > sampai) {
+            alert("Tanggal awal laporan tidak boleh melewati tanggal akhir.");
+            return;
+        }
+        const inRange = date => (!mulai || date >= mulai) && (!sampai || date <= sampai);
+        const penjualan = this.cache.penjualan.filter(p => inRange(p.tanggal_penjualan));
+        const penerimaan = this.cache.penerimaan.filter(p => inRange(p.tanggal_penerimaan));
+        const set = (id, value) => {
+            const element = document.getElementById(id);
+            if (element) element.textContent = value;
+        };
+        set("laporanTotalPenjualan", Utils.rupiah(
+            penjualan.reduce((total, p) => total + Number(p.total_penjualan || 0), 0)
+        ));
+        set("laporanTotalPenerimaan", Utils.rupiah(
+            penerimaan.reduce((total, p) => total + Number(p.jumlah_diterima || 0), 0)
+        ));
+        set("laporanSaldoPiutang", Utils.rupiah(
+            this.cache.penjualan.reduce((total, p) => total + Math.max(
+                0, Number(p.total_penjualan || 0) - this.paidAmount(p.id_penjualan)
+            ), 0)
+        ));
+
+        const salesBody = document.getElementById("tabelLaporanPenjualan");
+        if (salesBody) {
+            salesBody.innerHTML = penjualan.length
+                ? penjualan.map(p => {
+                    const dibayar = this.paidAmount(p.id_penjualan);
+                    return `<tr>
+                        <td>${Utils.tanggal(p.tanggal_penjualan)}</td>
+                        <td>${Utils.escape(p.pelanggan?.nama_pelanggan) || "-"}</td>
+                        <td>${Utils.escape(p.persediaan?.nama_barang) || "-"}</td>
+                        <td>${Number(p.jumlah_galon || 0)}</td>
+                        <td>${Utils.rupiah(p.total_penjualan)}</td>
+                        <td>${Utils.rupiah(dibayar)}</td>
+                        <td>${Utils.rupiah(Math.max(0, Number(p.total_penjualan || 0) - dibayar))}</td>
+                    </tr>`;
+                }).join("")
+                : `<tr><td colspan="7" class="empty-data">Tidak ada penjualan pada periode ini</td></tr>`;
+        }
+
+        const receiptsBody = document.getElementById("tabelLaporanPenerimaan");
+        if (receiptsBody) {
+            receiptsBody.innerHTML = penerimaan.length
+                ? penerimaan.map(p => `<tr>
+                    <td>${Utils.tanggal(p.tanggal_penerimaan)}</td>
+                    <td>#${p.id_penjualan}</td>
+                    <td>${Utils.escape(p.penjualan?.pelanggan?.nama_pelanggan) || "-"}</td>
+                    <td>${Utils.rupiah(p.jumlah_diterima)}</td>
+                    <td>${Utils.escape(p.metode_pembayaran)}</td>
+                </tr>`).join("")
+                : `<tr><td colspan="5" class="empty-data">Tidak ada penerimaan kas pada periode ini</td></tr>`;
+        }
+
+        const inventoryBody = document.getElementById("tabelLaporanPersediaan");
+        if (inventoryBody) {
+            inventoryBody.innerHTML = this.cache.persediaan.length
+                ? this.cache.persediaan.map(item => `<tr>
+                    <td>${Utils.escape(item.nama_barang)}</td>
+                    <td>${Number(item.stok || 0)}</td>
+                    <td>${Utils.escape(item.satuan)}</td>
+                    <td>${Utils.rupiah(item.harga)}</td>
+                </tr>`).join("")
+                : `<tr><td colspan="4" class="empty-data">Belum ada data persediaan</td></tr>`;
+        }
     },
 
     // =============================================
     // SELECT OPTIONS
     // =============================================
     fillSelects() {
+        const selPel = document.getElementById("pelangganPenjualan");
+        if (selPel) {
+            const cur = selPel.value;
+            selPel.innerHTML = `<option value="">Pilih pelanggan</option>` +
+                this.cache.pelanggan.map(p =>
+                    `<option value="${p.id_pelanggan}">
+                            ${Utils.escape(p.nama_pelanggan)}
+                    </option>`).join("");
+            selPel.value = cur;
+        }
+
         const selPer = document.getElementById("persediaanPenjualan");
         if (selPer) {
             const cur = selPer.value;
@@ -879,15 +1130,12 @@ const App = {
         const selPen = document.getElementById("penjualanPenerimaan");
         if (selPen) {
             const cur = selPen.value;
-            const belumLunas = this.cache.penjualan.filter(
-                p => p.status_pembayaran === "Belum Lunas"
-            );
             selPen.innerHTML = `<option value="">Pilih Transaksi</option>` +
-                belumLunas.map(p =>
-                    `<option value="${p.id_penjualan}">
-                        #${p.id_penjualan} —
-                        ${Utils.escape(p.pelanggan?.nama_pelanggan) || "-"} —
-                        ${Utils.rupiah(p.total_penjualan)}
+                this.cache.piutang.map(row =>
+                    `<option value="${row.id_penjualan}">
+                        #${row.id_penjualan} —
+                        ${Utils.escape(row.nama_pelanggan) || "-"} —
+                            Sisa ${Utils.rupiah(row.sisa_piutang)}
                     </option>`).join("");
             selPen.value = cur;
         }
@@ -921,12 +1169,16 @@ const App = {
         if (penjualanSelect && jumlahDiterimaInput) {
             penjualanSelect.onchange = () => {
                 const selectedId = Number(penjualanSelect.value);
-                const item = this.cache.penjualan.find(p => Number(p.id_penjualan) === selectedId);
+                const item = this.cache.piutang.find(
+                    row => Number(row.id_penjualan) === selectedId
+                );
                 if (item) {
-                    const total = Number(item.total_penjualan || 0);
-                    jumlahDiterimaInput.value = total;
+                    const sisa = Number(item.sisa_piutang || 0);
+                    jumlahDiterimaInput.value = sisa;
+                    jumlahDiterimaInput.max = sisa;
                 } else {
                     jumlahDiterimaInput.value = "";
+                    jumlahDiterimaInput.removeAttribute("max");
                 }
             };
         }
@@ -964,12 +1216,136 @@ const App = {
 // Ekspos App ke window agar tombol hapus (onclick) bisa akses
 window.App = App;
 
+const Auth = {
+    isAuthenticated: false,
+    appInitialized: false,
+
+    bind() {
+        const loginForm = document.getElementById("loginForm");
+        const loginMessage = document.getElementById("loginMessage");
+        const submitButton = document.getElementById("loginSubmit");
+        const passwordInput = document.getElementById("loginPassword");
+
+        loginForm?.addEventListener("submit", async event => {
+            event.preventDefault();
+            loginMessage.textContent = "";
+
+            const username = document.getElementById("loginUsername").value.trim();
+            const password = passwordInput.value;
+            if (username.toLocaleLowerCase("id-ID") !== CONFIG.AUTH_USERNAME.toLocaleLowerCase("id-ID")) {
+                loginMessage.textContent = "Username atau password tidak sesuai.";
+                return;
+            }
+
+            submitButton.disabled = true;
+            submitButton.querySelector("span").textContent = "Sedang masuk...";
+            try {
+                const { error } = await sb.auth.signInWithPassword({
+                    email: CONFIG.AUTH_EMAIL,
+                    password
+                });
+                if (error) {
+                    console.warn("[Auth] Login gagal:", error.message);
+                    loginMessage.textContent = "Username atau password tidak sesuai.";
+                }
+            } catch (error) {
+                console.error("[Auth] Tidak dapat menghubungi layanan login:", error);
+                loginMessage.textContent = "Tidak dapat terhubung ke layanan login.";
+            } finally {
+                submitButton.disabled = false;
+                submitButton.querySelector("span").textContent = "Masuk ke Aplikasi";
+            }
+
+        });
+
+        document.getElementById("togglePassword")?.addEventListener("click", event => {
+            const button = event.currentTarget;
+            const showing = passwordInput.type === "password";
+            passwordInput.type = showing ? "text" : "password";
+            button.setAttribute("aria-pressed", String(showing));
+            button.setAttribute(
+                "aria-label",
+                showing ? "Sembunyikan password" : "Tampilkan password"
+            );
+            button.innerHTML = `<i class="fa-regular fa-eye${showing ? "-slash" : ""}" aria-hidden="true"></i>`;
+        });
+
+        document.getElementById("logoutButton")?.addEventListener("click", async event => {
+            const button = event.currentTarget;
+            button.disabled = true;
+            try {
+                const { error } = await sb.auth.signOut();
+                if (error) throw error;
+            } catch (error) {
+                console.error("[Auth] Gagal keluar:", error);
+                alert("Gagal keluar dari aplikasi. Silakan coba kembali.");
+            } finally {
+                button.disabled = false;
+            }
+        });
+
+        sb.auth.onAuthStateChange((_event, session) => {
+            window.setTimeout(() => {
+                this.applySession(session).catch(error => {
+                    console.error("[Auth] Gagal menerapkan sesi:", error);
+                    loginMessage.textContent = "Gagal membuka aplikasi. Muat ulang halaman.";
+                });
+            }, 0);
+        });
+
+        sb.auth.getSession().then(({ data, error }) => {
+            if (error) {
+                console.error("[Auth] Gagal memeriksa sesi:", error);
+                loginMessage.textContent = "Sesi tidak dapat diperiksa. Muat ulang halaman.";
+                return;
+            }
+            this.applySession(data.session);
+        }).catch(error => {
+            console.error("[Auth] Gagal memeriksa sesi:", error);
+            loginMessage.textContent = "Tidak dapat terhubung ke layanan login.";
+        });
+    },
+
+    async applySession(session) {
+        const loginScreen = document.getElementById("loginScreen");
+        const appShell = document.getElementById("appShell");
+
+        if (!session) {
+            loginScreen.classList.remove("hidden");
+            appShell.classList.add("hidden");
+
+            if (this.isAuthenticated) {
+                this.isAuthenticated = false;
+                if (App.realtimeChannel) {
+                    await App.realtimeChannel.unsubscribe();
+                    App.realtimeChannel = null;
+                }
+                Object.keys(App.cache).forEach(key => {
+                    App.cache[key] = [];
+                });
+            }
+            return;
+        }
+
+        loginScreen.classList.add("hidden");
+        appShell.classList.remove("hidden");
+        document.getElementById("loginPassword").value = "";
+        if (this.isAuthenticated) return;
+
+        this.isAuthenticated = true;
+        if (!this.appInitialized) {
+            this.appInitialized = true;
+            await App.init();
+        } else {
+            await App.refreshAll();
+        }
+    }
+};
+
 // =====================================================
 // BOOT
 // =====================================================
 document.addEventListener("DOMContentLoaded", () => {
-    App.init().catch(err => {
-        console.error("[FATAL] Gagal init:", err);
-        alert("Terjadi kesalahan fatal. Cek Console (F12).");
-    });
+    Auth.bind();
+    document.getElementById("loginUsername").value = CONFIG.AUTH_USERNAME;
 });

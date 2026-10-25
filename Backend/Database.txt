@@ -18,6 +18,9 @@ CREATE TABLE IF NOT EXISTS pelanggan (
     created_at     TIMESTAMPTZ DEFAULT NOW()
 );
 
+ALTER TABLE public.pelanggan
+    DROP COLUMN IF EXISTS kategori;
+
 
 -- =====================================================
 -- 2. TABEL PERSEDIAAN
@@ -50,23 +53,41 @@ CREATE TABLE IF NOT EXISTS penjualan (
     harga_per_galon   NUMERIC(12,2) NOT NULL,
     total_penjualan   NUMERIC(12,2) NOT NULL DEFAULT 0,
     status_pembayaran VARCHAR(20) NOT NULL DEFAULT 'Belum Lunas',
+    jenis_pembayaran  VARCHAR(10) NOT NULL DEFAULT 'Kredit',
+    status_penyerahan VARCHAR(20) NOT NULL DEFAULT 'Belum Diserahkan',
     created_at        TIMESTAMPTZ DEFAULT NOW(),
 
     CONSTRAINT fk_penjualan_pelanggan
         FOREIGN KEY (id_pelanggan)
         REFERENCES pelanggan(id_pelanggan)
-        ON UPDATE CASCADE ON DELETE CASCADE,
+            ON UPDATE CASCADE ON DELETE RESTRICT,
 
     CONSTRAINT fk_penjualan_persediaan
         FOREIGN KEY (id_persediaan)
         REFERENCES persediaan(id_persediaan)
-        ON UPDATE CASCADE ON DELETE CASCADE,
+            ON UPDATE CASCADE ON DELETE RESTRICT,
 
     CONSTRAINT cek_jumlah_galon    CHECK (jumlah_galon > 0),
     CONSTRAINT cek_harga_galon     CHECK (harga_per_galon >= 0),
     CONSTRAINT cek_status_pembayaran
-        CHECK (status_pembayaran IN ('Lunas', 'Belum Lunas'))
+        CHECK (status_pembayaran IN ('Lunas', 'Belum Lunas')),
+    CONSTRAINT cek_jenis_pembayaran
+        CHECK (jenis_pembayaran IN ('Tunai', 'Kredit')),
+    CONSTRAINT cek_status_penyerahan
+        CHECK (status_penyerahan IN ('Belum Diserahkan', 'Sudah Sampai'))
 );
+
+ALTER TABLE public.penjualan
+    ADD COLUMN IF NOT EXISTS jenis_pembayaran VARCHAR(10) NOT NULL DEFAULT 'Kredit',
+    ADD COLUMN IF NOT EXISTS status_penyerahan VARCHAR(20) NOT NULL DEFAULT 'Belum Diserahkan';
+
+ALTER TABLE public.penjualan
+    DROP CONSTRAINT IF EXISTS cek_jenis_pembayaran,
+    ADD CONSTRAINT cek_jenis_pembayaran
+        CHECK (jenis_pembayaran IN ('Tunai', 'Kredit')),
+    DROP CONSTRAINT IF EXISTS cek_status_penyerahan,
+    ADD CONSTRAINT cek_status_penyerahan
+        CHECK (status_penyerahan IN ('Belum Diserahkan', 'Sudah Sampai'));
 
 CREATE INDEX IF NOT EXISTS idx_penjualan_pelanggan   ON penjualan(id_pelanggan);
 CREATE INDEX IF NOT EXISTS idx_penjualan_persediaan  ON penjualan(id_persediaan);
@@ -98,6 +119,36 @@ CREATE TABLE IF NOT EXISTS penerimaan_kas (
 
 CREATE INDEX IF NOT EXISTS idx_penerimaan_penjualan ON penerimaan_kas(id_penjualan);
 
+-- Pastikan constraint lama juga menerima seluruh metode pembayaran di aplikasi.
+DO $$
+DECLARE
+    constraint_row RECORD;
+BEGIN
+    FOR constraint_row IN
+        SELECT c.conname
+        FROM pg_constraint AS c
+        JOIN pg_attribute AS a
+          ON a.attrelid = c.conrelid
+         AND a.attnum = ANY(c.conkey)
+        WHERE c.contype = 'c'
+          AND c.conrelid = 'public.penerimaan_kas'::regclass
+          AND a.attname = 'metode_pembayaran'
+    LOOP
+        EXECUTE format(
+            'ALTER TABLE public.penerimaan_kas DROP CONSTRAINT %I',
+            constraint_row.conname
+        );
+    END LOOP;
+END $$;
+
+ALTER TABLE public.penerimaan_kas
+    DROP CONSTRAINT IF EXISTS cek_jumlah_diterima;
+
+ALTER TABLE public.penerimaan_kas
+    ADD CONSTRAINT cek_metode_pembayaran
+        CHECK (metode_pembayaran IN ('Tunai', 'Transfer', 'QRIS')),
+    ADD CONSTRAINT cek_jumlah_diterima
+        CHECK (jumlah_diterima > 0);
 
 -- =====================================================
 -- 4a. MIGRASI DATA YANG SUDAH ADA
@@ -125,7 +176,8 @@ ALTER TABLE public.persediaan
 ALTER TABLE public.persediaan
     ADD CONSTRAINT cek_harga CHECK (harga >= 0);
 
--- Ganti foreign key lama pada kolom relasi agar aturan CASCADE benar-benar aktif.
+-- Lindungi riwayat transaksi dengan menolak penghapusan pelanggan/barang yang
+-- masih dipakai; penerimaan tetap ikut terhapus saat transaksi penjualan dihapus.
 DO $$
 DECLARE
     constraint_row RECORD;
@@ -160,10 +212,10 @@ END $$;
 ALTER TABLE public.penjualan
     ADD CONSTRAINT fk_penjualan_pelanggan
         FOREIGN KEY (id_pelanggan) REFERENCES public.pelanggan(id_pelanggan)
-        ON UPDATE CASCADE ON DELETE CASCADE,
+        ON UPDATE CASCADE ON DELETE RESTRICT,
     ADD CONSTRAINT fk_penjualan_persediaan
         FOREIGN KEY (id_persediaan) REFERENCES public.persediaan(id_persediaan)
-        ON UPDATE CASCADE ON DELETE CASCADE;
+        ON UPDATE CASCADE ON DELETE RESTRICT;
 
 ALTER TABLE public.penerimaan_kas
     ADD CONSTRAINT fk_penerimaan_penjualan
@@ -183,6 +235,12 @@ AS $$
 DECLARE
     stok_sekarang INTEGER;
 BEGIN
+    IF NEW.jenis_pembayaran = 'Tunai' THEN
+        NEW.status_pembayaran := 'Lunas';
+    ELSE
+        NEW.status_pembayaran := 'Belum Lunas';
+    END IF;
+
     SELECT stok INTO stok_sekarang
     FROM persediaan
     WHERE id_persediaan = NEW.id_persediaan;
@@ -211,7 +269,7 @@ FOR EACH ROW
 EXECUTE FUNCTION fn_penjualan_before_insert();
 
 
--- 5b. AFTER INSERT: kurangi stok
+-- 5b. AFTER INSERT: kurangi stok dan catat pembayaran tunai
 CREATE OR REPLACE FUNCTION fn_penjualan_after_insert()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -221,6 +279,20 @@ BEGIN
     SET stok = stok - NEW.jumlah_galon,
         updated_at = NOW()
     WHERE id_persediaan = NEW.id_persediaan;
+
+    IF NEW.jenis_pembayaran = 'Tunai' AND NEW.total_penjualan > 0 THEN
+        INSERT INTO penerimaan_kas (
+            id_penjualan,
+            tanggal_penerimaan,
+            jumlah_diterima,
+            metode_pembayaran
+        ) VALUES (
+            NEW.id_penjualan,
+            NEW.tanggal_penjualan,
+            NEW.total_penjualan,
+            'Tunai'
+        );
+    END IF;
 
     RETURN NEW;
 END;
@@ -254,55 +326,496 @@ AFTER DELETE ON penjualan
 FOR EACH ROW
 EXECUTE FUNCTION fn_penjualan_after_delete();
 
+-- Sinkronkan status pelunasan dari seluruh penerimaan kas.
+CREATE OR REPLACE FUNCTION public.fn_sinkron_status_pembayaran()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = ''
+AS $$
+DECLARE
+    target_id_penjualan BIGINT;
+BEGIN
+    IF TG_OP <> 'INSERT'
+       AND TG_OP <> 'DELETE'
+       AND OLD.id_penjualan IS DISTINCT FROM NEW.id_penjualan THEN
+        UPDATE public.penjualan AS p
+        SET status_pembayaran = CASE
+            WHEN p.total_penjualan <= COALESCE((
+                SELECT SUM(pk.jumlah_diterima)
+                FROM public.penerimaan_kas AS pk
+                WHERE pk.id_penjualan = p.id_penjualan
+            ), 0) THEN 'Lunas'
+            ELSE 'Belum Lunas'
+        END
+        WHERE p.id_penjualan = OLD.id_penjualan;
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN
+        target_id_penjualan := OLD.id_penjualan;
+    ELSE
+        target_id_penjualan := NEW.id_penjualan;
+    END IF;
+
+    UPDATE public.penjualan AS p
+    SET status_pembayaran = CASE
+        WHEN p.total_penjualan <= COALESCE((
+            SELECT SUM(pk.jumlah_diterima)
+            FROM public.penerimaan_kas AS pk
+            WHERE pk.id_penjualan = p.id_penjualan
+        ), 0) THEN 'Lunas'
+        ELSE 'Belum Lunas'
+    END
+    WHERE p.id_penjualan = target_id_penjualan;
+
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_penerimaan_sinkron_status ON public.penerimaan_kas;
+CREATE TRIGGER trg_penerimaan_sinkron_status
+AFTER INSERT OR UPDATE OR DELETE ON public.penerimaan_kas
+FOR EACH ROW
+EXECUTE FUNCTION public.fn_sinkron_status_pembayaran();
+
+-- Perbaiki status transaksi lama agar sesuai total penerimaan yang sudah ada.
+UPDATE public.penjualan AS p
+SET status_pembayaran = CASE
+    WHEN p.total_penjualan <= COALESCE((
+        SELECT SUM(pk.jumlah_diterima)
+        FROM public.penerimaan_kas AS pk
+        WHERE pk.id_penjualan = p.id_penjualan
+    ), 0) THEN 'Lunas'
+    ELSE 'Belum Lunas'
+END;
+
+-- Catat pembayaran dan perbarui status dalam satu transaksi atomik.
+CREATE OR REPLACE FUNCTION public.fn_catat_penerimaan(
+    p_id_penjualan BIGINT,
+    p_tanggal_penerimaan DATE,
+    p_jumlah_diterima NUMERIC,
+    p_metode_pembayaran TEXT
+)
+RETURNS BIGINT
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = ''
+AS $$
+DECLARE
+    total_tagihan NUMERIC(12,2);
+    total_dibayar NUMERIC(12,2);
+    id_penerimaan_baru BIGINT;
+BEGIN
+    IF p_jumlah_diterima IS NULL OR p_jumlah_diterima <= 0 THEN
+        RAISE EXCEPTION 'Jumlah diterima harus lebih besar dari nol';
+    END IF;
+
+    IF p_metode_pembayaran IS NULL
+       OR p_metode_pembayaran NOT IN ('Tunai', 'Transfer', 'QRIS') THEN
+        RAISE EXCEPTION 'Metode pembayaran tidak valid';
+    END IF;
+
+    SELECT p.total_penjualan
+    INTO total_tagihan
+    FROM public.penjualan AS p
+    WHERE p.id_penjualan = p_id_penjualan
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Transaksi penjualan tidak ditemukan';
+    END IF;
+
+    SELECT COALESCE(SUM(pk.jumlah_diterima), 0)
+    INTO total_dibayar
+    FROM public.penerimaan_kas AS pk
+    WHERE pk.id_penjualan = p_id_penjualan;
+
+    IF p_jumlah_diterima > total_tagihan - total_dibayar THEN
+        RAISE EXCEPTION 'Jumlah diterima melebihi sisa piutang';
+    END IF;
+
+    INSERT INTO public.penerimaan_kas (
+        id_penjualan,
+        tanggal_penerimaan,
+        jumlah_diterima,
+        metode_pembayaran
+    ) VALUES (
+        p_id_penjualan,
+        COALESCE(p_tanggal_penerimaan, CURRENT_DATE),
+        p_jumlah_diterima,
+        p_metode_pembayaran
+    )
+    RETURNING id_penerimaan INTO id_penerimaan_baru;
+
+    RETURN id_penerimaan_baru;
+END;
+$$;
 
 -- =====================================================
--- 6. ROW LEVEL SECURITY
+-- 6. VIEW MENU PIUTANG DAN PENYERAHAN BARANG
 -- =====================================================
 
+CREATE OR REPLACE VIEW public.v_piutang
+WITH (security_invoker = true)
+AS
+WITH pembayaran AS (
+    SELECT id_penjualan, SUM(jumlah_diterima) AS total_dibayar
+    FROM public.penerimaan_kas
+    GROUP BY id_penjualan
+)
+SELECT
+    p.id_penjualan,
+    p.tanggal_penjualan,
+    p.id_pelanggan,
+    pl.nama_pelanggan,
+    p.total_penjualan,
+    COALESCE(byr.total_dibayar, 0)::NUMERIC(12,2) AS total_dibayar,
+    GREATEST(
+        p.total_penjualan - COALESCE(byr.total_dibayar, 0),
+        0
+    )::NUMERIC(12,2) AS sisa_piutang
+FROM public.penjualan AS p
+JOIN public.pelanggan AS pl ON pl.id_pelanggan = p.id_pelanggan
+LEFT JOIN pembayaran AS byr ON byr.id_penjualan = p.id_penjualan
+WHERE p.total_penjualan > COALESCE(byr.total_dibayar, 0);
+
+CREATE OR REPLACE VIEW public.v_penyerahan_barang
+WITH (security_invoker = true)
+AS
+WITH pembayaran AS (
+    SELECT id_penjualan, SUM(jumlah_diterima) AS total_dibayar
+    FROM public.penerimaan_kas
+    GROUP BY id_penjualan
+)
+SELECT
+    p.id_penjualan,
+    p.tanggal_penjualan,
+    p.id_pelanggan,
+    pl.nama_pelanggan,
+    p.id_persediaan,
+    ps.nama_barang,
+    p.jumlah_galon,
+    p.total_penjualan,
+    COALESCE(byr.total_dibayar, 0)::NUMERIC(12,2) AS total_dibayar,
+    GREATEST(
+        p.total_penjualan - COALESCE(byr.total_dibayar, 0),
+        0
+    )::NUMERIC(12,2) AS sisa_piutang,
+    CASE
+        WHEN p.total_penjualan <= COALESCE(byr.total_dibayar, 0) THEN 'Lunas'
+        ELSE 'Belum Lunas'
+    END AS status_pembayaran,
+    p.jenis_pembayaran,
+    p.status_penyerahan
+FROM public.penjualan AS p
+JOIN public.pelanggan AS pl ON pl.id_pelanggan = p.id_pelanggan
+JOIN public.persediaan AS ps ON ps.id_persediaan = p.id_persediaan
+LEFT JOIN pembayaran AS byr ON byr.id_penjualan = p.id_penjualan;
+
+
+-- =====================================================
+-- 7. ROW LEVEL SECURITY
+-- =====================================================
+
+-- Sebelum aplikasi digunakan, buat pengguna di Supabase Dashboard:
+-- Authentication > Users, menggunakan email yang sama dengan AUTH_EMAIL
+-- pada Frontend/JS/Config.js. Password dikelola oleh Supabase Auth, bukan SQL.
 ALTER TABLE pelanggan       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE persediaan      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE penjualan       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE penerimaan_kas  ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "public_all_pelanggan" ON pelanggan;
-CREATE POLICY "public_all_pelanggan"
-    ON pelanggan FOR ALL
-    USING (true) WITH CHECK (true);
+GRANT USAGE ON SCHEMA public TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
+    public.pelanggan,
+    public.persediaan,
+    public.penjualan,
+    public.penerimaan_kas
+TO authenticated;
+GRANT SELECT ON TABLE
+    public.v_piutang,
+    public.v_penyerahan_barang
+TO authenticated;
+REVOKE ALL ON FUNCTION public.fn_catat_penerimaan(BIGINT, DATE, NUMERIC, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.fn_catat_penerimaan(BIGINT, DATE, NUMERIC, TEXT)
+TO authenticated;
+REVOKE ALL ON FUNCTION public.fn_sinkron_status_pembayaran() FROM PUBLIC;
 
-DROP POLICY IF EXISTS "public_all_persediaan" ON persediaan;
-CREATE POLICY "public_all_persediaan"
-    ON persediaan FOR ALL
-    USING (true) WITH CHECK (true);
+DO $$
+DECLARE
+    table_name TEXT;
+    sequence_name REGCLASS;
+    column_name TEXT;
+    maximum_id BIGINT;
+    sequence_last_value BIGINT;
+    sequence_is_called BOOLEAN;
+BEGIN
+    FOREACH table_name IN ARRAY ARRAY[
+        'pelanggan', 'persediaan', 'penjualan', 'penerimaan_kas'
+    ]
+    LOOP
+        column_name := CASE table_name
+            WHEN 'pelanggan' THEN 'id_pelanggan'
+            WHEN 'persediaan' THEN 'id_persediaan'
+            WHEN 'penjualan' THEN 'id_penjualan'
+            ELSE 'id_penerimaan'
+        END;
+        sequence_name := pg_get_serial_sequence(
+            format('public.%I', table_name),
+            column_name
+        )::REGCLASS;
+        IF sequence_name IS NOT NULL THEN
+            EXECUTE format(
+                'REVOKE ALL ON SEQUENCE %s FROM PUBLIC, anon',
+                sequence_name
+            );
+            EXECUTE format(
+                'GRANT USAGE, SELECT ON SEQUENCE %s TO authenticated',
+                sequence_name
+            );
+            EXECUTE format(
+                'SELECT MAX(%I) FROM public.%I',
+                column_name,
+                table_name
+            ) INTO maximum_id;
+            EXECUTE format(
+                'SELECT last_value, is_called FROM %s',
+                sequence_name
+            ) INTO sequence_last_value, sequence_is_called;
+            IF maximum_id IS NOT NULL OR sequence_is_called THEN
+                PERFORM setval(
+                    sequence_name,
+                    GREATEST(
+                        COALESCE(maximum_id, 1),
+                        CASE WHEN sequence_is_called THEN sequence_last_value ELSE 1 END
+                    ),
+                    TRUE
+                );
+            END IF;
+        END IF;
+    END LOOP;
 
-DROP POLICY IF EXISTS "public_all_penjualan" ON penjualan;
-CREATE POLICY "public_all_penjualan"
-    ON penjualan FOR ALL
-    USING (true) WITH CHECK (true);
+    IF to_regclass('public.pengeluaran_kas') IS NOT NULL THEN
+        EXECUTE 'ALTER TABLE public.pengeluaran_kas ENABLE ROW LEVEL SECURITY';
+        EXECUTE 'DROP POLICY IF EXISTS public_all_pengeluaran ON public.pengeluaran_kas';
+        EXECUTE 'REVOKE ALL ON TABLE public.pengeluaran_kas FROM PUBLIC, anon, authenticated';
 
-DROP POLICY IF EXISTS "public_all_penerimaan" ON penerimaan_kas;
-CREATE POLICY "public_all_penerimaan"
-    ON penerimaan_kas FOR ALL
-    USING (true) WITH CHECK (true);
+        sequence_name := pg_get_serial_sequence(
+            'public.pengeluaran_kas',
+            'id_pengeluaran'
+        )::REGCLASS;
+        IF sequence_name IS NOT NULL THEN
+            EXECUTE format(
+                'REVOKE ALL ON SEQUENCE %s FROM PUBLIC, anon, authenticated',
+                sequence_name
+            );
+        END IF;
+    END IF;
+END $$;
+
+-- Hapus policy lama agar tidak ada policy permissive yang tetap membuka akses.
+DO $$
+DECLARE
+    target_table TEXT;
+    policy_name TEXT;
+BEGIN
+    FOREACH target_table IN ARRAY ARRAY[
+        'pelanggan', 'persediaan', 'penjualan', 'penerimaan_kas'
+    ]
+    LOOP
+        FOR policy_name IN
+            SELECT polname
+            FROM pg_policy
+            WHERE polrelid = format('public.%I', target_table)::REGCLASS
+        LOOP
+            EXECUTE format(
+                'DROP POLICY %I ON public.%I',
+                policy_name,
+                target_table
+            );
+        END LOOP;
+    END LOOP;
+END $$;
+
+-- Hanya akun aplikasi yang sudah login dapat membaca atau mengubah data.
+CREATE POLICY "auth_cahaya_pelanggan"
+    ON public.pelanggan FOR ALL TO authenticated
+    USING ((SELECT auth.jwt() ->> 'email') = 'cahmil500@gmail.com')
+    WITH CHECK ((SELECT auth.jwt() ->> 'email') = 'cahmil500@gmail.com');
+
+CREATE POLICY "auth_cahaya_persediaan"
+    ON public.persediaan FOR ALL TO authenticated
+    USING ((SELECT auth.jwt() ->> 'email') = 'cahmil500@gmail.com')
+    WITH CHECK ((SELECT auth.jwt() ->> 'email') = 'cahmil500@gmail.com');
+
+CREATE POLICY "auth_cahaya_penjualan"
+    ON public.penjualan FOR ALL TO authenticated
+    USING ((SELECT auth.jwt() ->> 'email') = 'cahmil500@gmail.com')
+    WITH CHECK ((SELECT auth.jwt() ->> 'email') = 'cahmil500@gmail.com');
+
+CREATE POLICY "auth_cahaya_penerimaan"
+    ON public.penerimaan_kas FOR ALL TO authenticated
+    USING ((SELECT auth.jwt() ->> 'email') = 'cahmil500@gmail.com')
+    WITH CHECK ((SELECT auth.jwt() ->> 'email') = 'cahmil500@gmail.com');
+
+REVOKE ALL ON TABLE
+    public.pelanggan,
+    public.persediaan,
+    public.penjualan,
+    public.penerimaan_kas,
+    public.v_piutang,
+    public.v_penyerahan_barang
+FROM PUBLIC, anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
+    public.pelanggan,
+    public.persediaan,
+    public.penjualan,
+    public.penerimaan_kas
+TO authenticated;
+GRANT SELECT ON TABLE
+    public.v_piutang,
+    public.v_penyerahan_barang
+TO authenticated;
+
+REVOKE ALL ON FUNCTION public.fn_catat_penerimaan(BIGINT, DATE, NUMERIC, TEXT)
+FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.fn_catat_penerimaan(BIGINT, DATE, NUMERIC, TEXT)
+TO authenticated;
+
+-- Aplikasi berlangganan perubahan stok secara realtime.
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_publication
+        WHERE pubname = 'supabase_realtime'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM pg_publication_tables
+        WHERE pubname = 'supabase_realtime'
+          AND schemaname = 'public'
+          AND tablename = 'persediaan'
+    ) THEN
+        ALTER PUBLICATION supabase_realtime ADD TABLE public.persediaan;
+    END IF;
+END $$;
 
 
 -- =====================================================
--- 7. CEK HASIL
+-- 8. CEK HASIL
 -- =====================================================
 
 -- Minta Supabase REST API memuat ulang cache schema setelah DDL.
 NOTIFY pgrst, 'reload schema';
 
--- Pastikan kolom harga terdaftar pada schema public.
+-- Pastikan kolom yang digunakan menu dan laporan aplikasi tersedia.
 SELECT table_schema, table_name, column_name, data_type
 FROM information_schema.columns
 WHERE table_schema = 'public'
-    AND table_name = 'persediaan'
-    AND column_name = 'harga';
+    AND (
+        (table_name, column_name) IN (
+        ('pelanggan', 'id_pelanggan'),
+        ('pelanggan', 'nama_pelanggan'),
+        ('pelanggan', 'no_hp'),
+        ('pelanggan', 'alamat'),
+        ('persediaan', 'id_persediaan'),
+        ('persediaan', 'nama_barang'),
+        ('persediaan', 'stok'),
+        ('persediaan', 'harga'),
+        ('persediaan', 'satuan'),
+        ('penjualan', 'id_penjualan'),
+        ('penjualan', 'id_pelanggan'),
+        ('penjualan', 'id_persediaan'),
+        ('penjualan', 'tanggal_penjualan'),
+        ('penjualan', 'jumlah_galon'),
+        ('penjualan', 'harga_per_galon'),
+        ('penjualan', 'total_penjualan'),
+        ('penjualan', 'status_pembayaran'),
+        ('penjualan', 'jenis_pembayaran'),
+        ('penjualan', 'status_penyerahan'),
+        ('penerimaan_kas', 'id_penerimaan'),
+        ('penerimaan_kas', 'id_penjualan'),
+        ('penerimaan_kas', 'tanggal_penerimaan'),
+        ('penerimaan_kas', 'jumlah_diterima'),
+        ('penerimaan_kas', 'metode_pembayaran')
+        )
+        OR (table_name, column_name) IN (
+            ('v_piutang', 'id_penjualan'),
+            ('v_piutang', 'tanggal_penjualan'),
+            ('v_piutang', 'id_pelanggan'),
+            ('v_piutang', 'nama_pelanggan'),
+            ('v_piutang', 'total_penjualan'),
+            ('v_piutang', 'total_dibayar'),
+            ('v_piutang', 'sisa_piutang'),
+            ('v_penyerahan_barang', 'id_penjualan'),
+            ('v_penyerahan_barang', 'tanggal_penjualan'),
+            ('v_penyerahan_barang', 'id_pelanggan'),
+            ('v_penyerahan_barang', 'nama_pelanggan'),
+            ('v_penyerahan_barang', 'id_persediaan'),
+            ('v_penyerahan_barang', 'nama_barang'),
+            ('v_penyerahan_barang', 'jumlah_galon'),
+            ('v_penyerahan_barang', 'total_penjualan'),
+            ('v_penyerahan_barang', 'total_dibayar'),
+            ('v_penyerahan_barang', 'sisa_piutang'),
+            ('v_penyerahan_barang', 'status_pembayaran'),
+            ('v_penyerahan_barang', 'jenis_pembayaran'),
+            ('v_penyerahan_barang', 'status_penyerahan')
+        )
+    )
+ORDER BY table_name, ordinal_position;
+
+-- Harapkan rls_enabled=true, anon_can_select=false, dan
+-- authenticated_can_select=true untuk tiap tabel utama.
+SELECT
+    c.relname AS table_name,
+    c.relrowsecurity AS rls_enabled,
+    has_table_privilege('anon', c.oid, 'SELECT') AS anon_can_select,
+    has_table_privilege('authenticated', c.oid, 'SELECT') AS authenticated_can_select
+FROM pg_class AS c
+JOIN pg_namespace AS n ON n.oid = c.relnamespace
+WHERE n.nspname = 'public'
+    AND c.relname IN (
+        'pelanggan', 'persediaan', 'penjualan', 'penerimaan_kas'
+    )
+ORDER BY c.relname;
+
+-- anon_can_execute harus false; authenticated_can_execute harus true.
+SELECT
+    has_function_privilege(
+        'anon',
+        'public.fn_catat_penerimaan(bigint,date,numeric,text)',
+        'EXECUTE'
+    ) AS anon_can_execute,
+    has_function_privilege(
+        'authenticated',
+        'public.fn_catat_penerimaan(bigint,date,numeric,text)',
+        'EXECUTE'
+    ) AS authenticated_can_execute;
+
+-- Periksa policy RLS dan objek trigger yang menghubungkan menu ke database.
+SELECT schemaname, tablename, policyname, roles, cmd
+FROM pg_policies
+WHERE schemaname = 'public'
+    AND tablename IN (
+        'pelanggan', 'persediaan', 'penjualan', 'penerimaan_kas'
+    )
+ORDER BY tablename, policyname;
+
+SELECT event_object_table AS table_name, trigger_name, event_manipulation
+FROM information_schema.triggers
+WHERE trigger_schema = 'public'
+    AND event_object_table IN (
+        'persediaan', 'penjualan', 'penerimaan_kas'
+    )
+ORDER BY event_object_table, trigger_name, event_manipulation;
 
 -- SELECT * FROM pelanggan;
 -- SELECT * FROM persediaan;
 -- SELECT * FROM penjualan;
 -- SELECT * FROM penerimaan_kas;
+-- SELECT * FROM v_piutang;
+-- SELECT * FROM v_penyerahan_barang;
 
 -- =====================================================
 -- SELESAI

@@ -36,10 +36,10 @@ jobs:
           cp "Frontend/JS/Config.js" "_site/js/config.js"
           cp "Frontend/JS/apps.js" "_site/js/apps.js"
 
-          # Sesuaikan path CSS dan JavaScript untuk GitHub Pages
-          sed -i 's#../css/style.css#css/style.css#' "_site/index.html"
-          sed -i 's#../js/config.js#js/config.js#' "_site/index.html"
-          sed -i 's#../js/apps.js#js/apps.js#' "_site/index.html"
+          # Sesuaikan path aset sesuai kapitalisasi file sumber.
+          sed -i 's#../CSS/Style.css#css/style.css#' "_site/index.html"
+          sed -i 's#../JS/Config.js#js/config.js#' "_site/index.html"
+          sed -i 's#../JS/apps.js#js/apps.js#' "_site/index.html"
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

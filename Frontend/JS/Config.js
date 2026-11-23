@@ -8,8 +8,8 @@ const CONFIG = {
     APP_VERSION: "1.0.0",
 
     // Kredensial Supabase
-    SUPABASE_URL: "https://cbwxhdqyjxloybpvnbxr.supabase.co",
-    SUPABASE_KEY: "sb_publishable_JIJMuy7S_p3peLYsa0jfTw_ymvBuNPO",
+    SUPABASE_URL: "https://vdrrgtodlstctzehypkr.supabase.co",
+    SUPABASE_KEY: "sb_publishable_uelKq0PUFkBAIDWS2cIJzQ__SZBUOFZ",
 
     // Username is mapped to this Supabase Auth account; passwords stay in Auth.
     AUTH_USERNAME: "Cahayakamila77",
@@ -19,6 +19,9 @@ const CONFIG = {
     TABLES: {
         PELANGGAN: "pelanggan",
         PERSEDIAAN: "persediaan",
+        PRODUK: "produk",
+        BAHAN_PERSEDIAAN: "bahan_persediaan",
+        KOMPOSISI_PRODUK: "komposisi_produk",
         PENJUALAN: "penjualan",
         PENERIMAAN: "penerimaan_kas"
     },

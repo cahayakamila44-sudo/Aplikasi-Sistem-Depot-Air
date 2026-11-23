@@ -47,10 +47,13 @@ const Utils = {
             console.error(`[${label}]`, err);
 
             let msg = err.message || String(err);
-            if (msg.includes("Stok tidak mencukupi")) {
+            if (
+                msg.includes("Stok tidak mencukupi") ||
+                (msg.includes("Stok bahan") && msg.includes("tidak mencukupi"))
+            ) {
                 msg = "Stok tidak mencukupi untuk transaksi ini.";
             } else if (msg.includes("tidak ditemukan")) {
-                msg = "Data persediaan tidak ditemukan.";
+                msg = "Data yang dipilih tidak ditemukan.";
             } else if (msg.includes("duplicate key")) {
                 msg = "Data sudah ada.";
             } else if (msg.includes("violates foreign key")) {
@@ -109,11 +112,14 @@ const App = {
     cache: {
         pelanggan: [],
         persediaan: [],
+        bahanPersediaan: [],
+        komposisiProduk: [],
         penjualan: [],
         penerimaan: [],
         piutang: [],
         penyerahan: []
     },
+    profitChart: null,
 
     // ---------------------------------------------
     // INIT
@@ -123,6 +129,7 @@ const App = {
         this.bindNav();
         this.bindForms();
         this.setDefaultDates();
+        await this.ensureHybridSeed();
         this.setupRealtime();
 
         // Tampilkan dashboard dulu supaya UI responsif
@@ -199,7 +206,7 @@ const App = {
             {
                 event: "INSERT",
                 schema: "public",
-                table: CONFIG.TABLES.PERSEDIAAN
+                table: CONFIG.TABLES.PRODUK
             },
             async () => {
                 console.log("[Realtime] INSERT persediaan terdeteksi");
@@ -215,7 +222,7 @@ const App = {
             {
                 event: "UPDATE",
                 schema: "public",
-                table: CONFIG.TABLES.PERSEDIAAN
+                table: CONFIG.TABLES.PRODUK
             },
             async () => {
                 console.log("[Realtime] UPDATE persediaan terdeteksi");
@@ -231,7 +238,7 @@ const App = {
             {
                 event: "DELETE",
                 schema: "public",
-                table: CONFIG.TABLES.PERSEDIAAN
+                table: CONFIG.TABLES.PRODUK
             },
             async () => {
                 console.log("[Realtime] DELETE persediaan terdeteksi");
@@ -251,6 +258,73 @@ const App = {
         });
 
         this.realtimeChannel = channel;
+
+        if (this.bahanRealtimeChannel) {
+            this.bahanRealtimeChannel.unsubscribe();
+        }
+        const bahanChannel = sb.channel("bahan-hpp-live");
+        bahanChannel.on(
+            "postgres_changes",
+            {
+                event: "*",
+                schema: "public",
+                table: CONFIG.TABLES.BAHAN_PERSEDIAAN
+            },
+            async () => {
+                await Promise.all([this.loadBahanPersediaan(), this.loadPersediaan()]);
+                this.fillSelects();
+                this.updateDashboard();
+                this.renderLaporan();
+            }
+        );
+        bahanChannel.on(
+            "postgres_changes",
+            {
+                event: "*",
+                schema: "public",
+                table: CONFIG.TABLES.KOMPOSISI_PRODUK
+            },
+            async () => {
+                await Promise.all([this.loadKomposisiProduk(), this.loadPersediaan()]);
+                this.fillSelects();
+                this.renderLaporan();
+            }
+        );
+        bahanChannel.subscribe(status => {
+            if (status === "CHANNEL_ERROR") {
+                console.error("[Realtime] channel bahan/HPP gagal terhubung");
+            }
+        });
+        this.bahanRealtimeChannel = bahanChannel;
+
+        if (this.penjualanRealtimeChannel) {
+            this.penjualanRealtimeChannel.unsubscribe();
+        }
+        const penjualanChannel = sb.channel("penjualan-profit-live");
+        penjualanChannel.on(
+            "postgres_changes",
+            {
+                event: "*",
+                schema: "public",
+                table: CONFIG.TABLES.PENJUALAN
+            },
+            async () => {
+                await Promise.all([
+                    this.loadPenjualan(),
+                    this.loadPenerimaan(),
+                    this.loadPiutang(),
+                    this.loadPenyerahan()
+                ]);
+                this.updateDashboard();
+                this.renderLaporan();
+            }
+        );
+        penjualanChannel.subscribe(status => {
+            if (status === "CHANNEL_ERROR") {
+                console.error("[Realtime] channel penjualan gagal terhubung");
+            }
+        });
+        this.penjualanRealtimeChannel = penjualanChannel;
     },
 
     // ---------------------------------------------
@@ -265,13 +339,28 @@ const App = {
             });
         }
 
-        const formPersediaan = document.getElementById("formPersediaan");
-        if (formPersediaan) {
-            formPersediaan.addEventListener("submit", async (e) => {
-                e.preventDefault();
-                await this.simpanPersediaan();
-            });
-        }
+        document.getElementById("btnTambahItem")?.addEventListener("click", () => this.bukaFormItem());
+        document.getElementById("btnBatalItem")?.addEventListener("click", () => this.tutupFormItem());
+        document.getElementById("formItemPersediaan")?.addEventListener("submit", async event => {
+            event.preventDefault();
+            await this.simpanItemPersediaan();
+        });
+        document.getElementById("btnTambahProduk")?.addEventListener("click", () => this.bukaFormProduk());
+        document.getElementById("btnBatalProduk")?.addEventListener("click", () => this.tutupFormProduk());
+        document.getElementById("formProduk")?.addEventListener("submit", async event => {
+            event.preventDefault();
+            await this.simpanProduk();
+        });
+
+        document.getElementById("formKulakan")?.addEventListener("submit", async event => {
+            event.preventDefault();
+            await this.simpanKulakan();
+        });
+
+        document.getElementById("formKomposisi")?.addEventListener("submit", async event => {
+            event.preventDefault();
+            await this.simpanKomposisiProduk();
+        });
 
         const formPenjualan = document.getElementById("formPenjualan");
         if (formPenjualan) {
@@ -304,15 +393,135 @@ const App = {
         await Promise.all([
             this.loadPelanggan(),
             this.loadPersediaan(),
+            this.loadBahanPersediaan(),
+            this.loadKomposisiProduk(),
             this.loadPenjualan(),
             this.loadPenerimaan(),
             this.loadPiutang(),
             this.loadPenyerahan()
         ]);
+        this.renderPersediaan();
+        this.renderKomposisiProduk();
         this.renderPenjualan();
         this.updateDashboard();
         this.fillSelects();
         this.renderLaporan();
+    },
+
+    async ensureHybridSeed() {
+        const seedBahan = [
+            { nama_bahan: "Air Baku", jenis_item: "bahan_isi_ulang", satuan: "Liter", stok_tersedia: 8000, harga_modal_satuan: 40 },
+            { nama_bahan: "Tutup Galon Standar 19L", jenis_item: "bahan_isi_ulang", satuan: "Pcs", stok_tersedia: 1000, harga_modal_satuan: 150 },
+            { nama_bahan: "Tutup Galon Ulir 15L", jenis_item: "bahan_isi_ulang", satuan: "Pcs", stok_tersedia: 500, harga_modal_satuan: 250 },
+            { nama_bahan: "Tisu Galon", jenis_item: "bahan_isi_ulang", satuan: "Pcs", stok_tersedia: 1000, harga_modal_satuan: 100 },
+            { nama_bahan: "Segel Plastik", jenis_item: "bahan_isi_ulang", satuan: "Pcs", stok_tersedia: 1000, harga_modal_satuan: 50 },
+            { nama_bahan: "Galon Kosong Polos 19L", jenis_item: "bahan_isi_ulang", satuan: "Pcs", stok_tersedia: 50, harga_modal_satuan: 32000 },
+            { nama_bahan: "Galon Aqua 19L (Isi Pabrik)", jenis_item: "produk_pabrikan", satuan: "Galon", stok_tersedia: 40, harga_modal_satuan: 18500 },
+            { nama_bahan: "Galon Le Minerale 15L (Isi Pabrik)", jenis_item: "produk_pabrikan", satuan: "Galon", stok_tersedia: 40, harga_modal_satuan: 18000 },
+            { nama_bahan: "Galon Vit 19L (Isi Pabrik)", jenis_item: "produk_pabrikan", satuan: "Galon", stok_tersedia: 30, harga_modal_satuan: 16500 }
+        ];
+        const seedProduk = [
+            { nama_produk: "Isi Ulang Air Mineral 19L", jenis_produk: "isi_ulang", satuan: "Galon", harga_jual: 5000 },
+            { nama_produk: "Isi Ulang Air RO 19L", jenis_produk: "isi_ulang", satuan: "Galon", harga_jual: 7000 },
+            { nama_produk: "Isi Ulang Galon 15L", jenis_produk: "isi_ulang", satuan: "Galon", harga_jual: 5000 },
+            { nama_produk: "Paket Galon Baru Polos 19L + Isi Mineral", jenis_produk: "isi_ulang", satuan: "Galon", harga_jual: 42000 },
+            { nama_produk: "Galon Aqua 19L (Original Pabrik)", jenis_produk: "pabrikan", satuan: "Galon", harga_jual: 22000 },
+            { nama_produk: "Galon Le Minerale 15L (Original Pabrik)", jenis_produk: "pabrikan", satuan: "Galon", harga_jual: 21500 },
+            { nama_produk: "Galon Vit 19L (Original Pabrik)", jenis_produk: "pabrikan", satuan: "Galon", harga_jual: 19500 }
+        ];
+        const seedKomposisi = [
+            ["Isi Ulang Air Mineral 19L", "Air Baku", 19],
+            ["Isi Ulang Air Mineral 19L", "Tutup Galon Standar 19L", 1],
+            ["Isi Ulang Air Mineral 19L", "Tisu Galon", 1],
+            ["Isi Ulang Air Mineral 19L", "Segel Plastik", 1],
+            ["Isi Ulang Air RO 19L", "Air Baku", 19],
+            ["Isi Ulang Air RO 19L", "Tutup Galon Standar 19L", 1],
+            ["Isi Ulang Air RO 19L", "Tisu Galon", 1],
+            ["Isi Ulang Air RO 19L", "Segel Plastik", 1],
+            ["Isi Ulang Galon 15L", "Air Baku", 15],
+            ["Isi Ulang Galon 15L", "Tutup Galon Ulir 15L", 1],
+            ["Isi Ulang Galon 15L", "Tisu Galon", 1],
+            ["Isi Ulang Galon 15L", "Segel Plastik", 1],
+            ["Paket Galon Baru Polos 19L + Isi Mineral", "Galon Kosong Polos 19L", 1],
+            ["Paket Galon Baru Polos 19L + Isi Mineral", "Air Baku", 19],
+            ["Paket Galon Baru Polos 19L + Isi Mineral", "Tutup Galon Standar 19L", 1],
+            ["Paket Galon Baru Polos 19L + Isi Mineral", "Tisu Galon", 1],
+            ["Paket Galon Baru Polos 19L + Isi Mineral", "Segel Plastik", 1],
+            ["Galon Aqua 19L (Original Pabrik)", "Galon Aqua 19L (Isi Pabrik)", 1],
+            ["Galon Le Minerale 15L (Original Pabrik)", "Galon Le Minerale 15L (Isi Pabrik)", 1],
+            ["Galon Vit 19L (Original Pabrik)", "Galon Vit 19L (Isi Pabrik)", 1]
+        ];
+
+        const bahan = await Utils.guard(
+            sb.from(CONFIG.TABLES.BAHAN_PERSEDIAAN).select("id, nama_bahan"),
+            "memeriksa seed bahan persediaan"
+        );
+        if (bahan === null) return;
+        const existingBahan = new Set(bahan.map(item => item.nama_bahan));
+        const missingBahan = seedBahan.filter(item => !existingBahan.has(item.nama_bahan));
+        if (missingBahan.length) {
+            const inserted = await Utils.guard(
+                sb.from(CONFIG.TABLES.BAHAN_PERSEDIAAN)
+                  .upsert(missingBahan, { onConflict: "nama_bahan", ignoreDuplicates: true }),
+                "menginisialisasi bahan persediaan"
+            );
+            if (inserted === null) return;
+        }
+
+        const produk = await Utils.guard(
+            sb.from(CONFIG.TABLES.PRODUK).select("id, nama_produk"),
+            "memeriksa seed produk"
+        );
+        if (produk === null) return;
+        const existingProduk = new Set(produk.map(item => item.nama_produk));
+        const missingProduk = seedProduk.filter(item => !existingProduk.has(item.nama_produk));
+        if (missingProduk.length) {
+            const inserted = await Utils.guard(
+                sb.from(CONFIG.TABLES.PRODUK)
+                  .upsert(missingProduk, { onConflict: "nama_produk", ignoreDuplicates: true }),
+                "menginisialisasi produk"
+            );
+            if (inserted === null) return;
+        }
+
+        const [allProduk, allBahan, komposisi] = await Promise.all([
+            Utils.fetchAll(
+                () => sb.from(CONFIG.TABLES.PRODUK).select("id, nama_produk"),
+                "memuat produk untuk seed komposisi"
+            ),
+            Utils.fetchAll(
+                () => sb.from(CONFIG.TABLES.BAHAN_PERSEDIAAN).select("id, nama_bahan"),
+                "memuat bahan untuk seed komposisi"
+            ),
+            Utils.fetchAll(
+                () => sb.from(CONFIG.TABLES.KOMPOSISI_PRODUK).select("produk_id, bahan_id"),
+                "memeriksa seed komposisi"
+            )
+        ]);
+        if (allProduk === null || allBahan === null || komposisi === null) return;
+        const produkId = new Map(allProduk.map(item => [item.nama_produk, item.id]));
+        const bahanId = new Map(allBahan.map(item => [item.nama_bahan, item.id]));
+        const existingKomposisi = new Set(
+            komposisi.map(item => `${item.produk_id}:${item.bahan_id}`)
+        );
+        const missingKomposisi = seedKomposisi.reduce((items, [namaProduk, namaBahan, jumlah]) => {
+            const pId = produkId.get(namaProduk);
+            const bId = bahanId.get(namaBahan);
+            if (pId && bId && !existingKomposisi.has(`${pId}:${bId}`)) {
+                items.push({ produk_id: pId, bahan_id: bId, jumlah_pakai: jumlah });
+            }
+            return items;
+        }, []);
+        if (missingKomposisi.length) {
+            await Utils.guard(
+                sb.from(CONFIG.TABLES.KOMPOSISI_PRODUK)
+                  .upsert(missingKomposisi, {
+                      onConflict: "produk_id,bahan_id",
+                      ignoreDuplicates: true
+                  }),
+                "menginisialisasi komposisi produk"
+            );
+        }
     },
 
     // =============================================
@@ -413,18 +622,18 @@ const App = {
     async loadPersediaan() {
         console.log("[App] loadPersediaan() ...");
         const data = await Utils.fetchAll(
-            () => sb.from(CONFIG.TABLES.PERSEDIAAN)
+            () => sb.from(CONFIG.TABLES.PRODUK)
               .select("*")
-              .order("id_persediaan", { ascending: true }),
-            "memuat persediaan"
+              .order("id", { ascending: true }),
+            "memuat produk"
         );
         if (data === null) {
-            const tbody = document.getElementById("tabelPersediaan");
+            const tbody = document.getElementById("tabelProduk");
             if (tbody) {
                 tbody.innerHTML = `
                     <tr><td colspan="7" class="empty-data">
                         <i class="fa-solid fa-triangle-exclamation"></i><br>
-                        Gagal memuat data. Cek Console (F12).
+                        Gagal memuat produk. Pastikan skema Supabase telah diterapkan.
                     </td></tr>`;
             }
             return;
@@ -432,58 +641,47 @@ const App = {
         this.cache.persediaan = data || [];
         console.log(`[App] persediaan: ${this.cache.persediaan.length} baris`);
         this.renderPersediaan();
+        this.renderKomposisiProduk();
     },
 
     renderPersediaan() {
-        const tbody = document.getElementById("tabelPersediaan");
+        const tbody = document.getElementById("tabelProduk");
         if (!tbody) return;
 
         if (!this.cache.persediaan.length) {
             tbody.innerHTML = `
                 <tr><td colspan="7" class="empty-data">
                     <i class="fa-solid fa-box-open"></i><br>
-                    Belum ada data persediaan
+                    Belum ada produk
                 </td></tr>`;
             return;
         }
 
         tbody.innerHTML = this.cache.persediaan.map((p, i) => {
-            let kelas = "stok-normal";
-            if (p.stok === 0) kelas = "stok-habis";
-            else if (p.stok <= 10) kelas = "stok-sedikit";
-
-            const hargaSaatIni = Number(p.harga || 0);
-
+            const recipe = this.cache.komposisiProduk.filter(
+                item => Number(item.produk_id) === Number(p.id)
+            );
+            const stockByMaterial = new Map(
+                this.cache.bahanPersediaan.map(item => [Number(item.id), Number(item.stok_tersedia || 0)])
+            );
+            const available = recipe.length
+                ? Math.floor(Math.min(...recipe.map(item =>
+                    stockByMaterial.get(Number(item.bahan_id)) / Number(item.jumlah_pakai)
+                )))
+                : null;
             return `
                 <tr>
                     <td>${i + 1}</td>
-                    <td>${Utils.escape(p.nama_barang)}</td>
-                    <td><span class="${kelas}">${p.stok}</span></td>
+                    <td><span class="inventory-badge ${p.jenis_produk === "pabrikan" ? "badge-factory" : "badge-refill"}">${p.jenis_produk === "pabrikan" ? "Produk Jadi Pabrikan" : "Isi Ulang"}</span></td>
+                    <td>${Utils.escape(p.nama_produk)}</td>
+                    <td>${available === null ? "Komposisi belum diatur" : `${available} ${Utils.escape(p.satuan)}`}</td>
+                    <td>${Utils.rupiah(p.harga_jual)}</td>
+                    <td>${Utils.rupiah(p.hpp_per_unit)}</td>
                     <td>
-                        <div style="display:flex; gap:8px; align-items:center;">
-                            <input
-                                type="number"
-                                min="0"
-                                value="${hargaSaatIni}"
-                                data-id="${p.id_persediaan}"
-                                data-role="harga-persediaan"
-                                style="width:110px; padding:6px 8px; border:1px solid #d9d9d9; border-radius:8px;"
-                            >
-                            <button
-                                type="button"
-                                class="btn-primary"
-                                style="padding:6px 10px; font-size:12px;"
-                                onclick="App.simpanHargaPersediaan(${p.id_persediaan})"
-                            >
-                                Simpan
-                            </button>
-                        </div>
-                    </td>
-                    <td>${Utils.escape(p.satuan)}</td>
-                    <td>${Utils.tanggal(p.updated_at)}</td>
-                    <td>
-                        <button class="btn-delete"
-                            onclick="App.hapusPersediaan(${p.id_persediaan})">
+                        <button class="btn-secondary" onclick="App.editProduk(${p.id})">
+                            <i class="fa-solid fa-pen"></i> Edit
+                        </button>
+                        <button class="btn-delete" onclick="App.hapusProduk(${p.id})">
                             <i class="fa-solid fa-trash"></i> Hapus
                         </button>
                     </td>
@@ -491,124 +689,312 @@ const App = {
         }).join("");
     },
 
-    async simpanHargaPersediaan(id) {
-        const input = document.querySelector(`input[data-role="harga-persediaan"][data-id="${id}"]`);
-        if (!input) return;
-
-        const harga = Number(input.value);
-        if (input.value.trim() === "" || !Number.isFinite(harga) || harga < 0) {
-            alert("Harga tidak valid.");
-            return;
-        }
-
-        const result = await Utils.guard(
-            sb.from(CONFIG.TABLES.PERSEDIAAN)
-              .update({
-                  harga,
-                  updated_at: new Date().toISOString()
-              })
-              .eq("id_persediaan", id)
-              .select("id_persediaan"),
-            "update harga persediaan"
+    async loadBahanPersediaan() {
+        const data = await Utils.fetchAll(
+            () => sb.from(CONFIG.TABLES.BAHAN_PERSEDIAAN)
+              .select("*")
+              .order("id", { ascending: true }),
+            "memuat bahan persediaan"
         );
-
-        if (!result) return;
-        if (result.length === 0) {
-            alert("Harga tidak tersimpan. Periksa izin update (RLS) dan ID persediaan.");
+        if (data === null) {
+            const tbody = document.getElementById("tabelPersediaan");
+            if (tbody) {
+                tbody.innerHTML = `
+                    <tr><td colspan="8" class="empty-data">
+                        <i class="fa-solid fa-triangle-exclamation"></i><br>
+                        Gagal memuat bahan. Cek Console (F12).
+                    </td></tr>`;
+            }
             return;
         }
-
-        await this.loadPersediaan();
+        this.cache.bahanPersediaan = data;
+        this.renderBahanPersediaan();
+        this.renderPersediaan();
+        this.renderKomposisiProduk();
         this.fillSelects();
-        this.updateDashboard();
-        alert("Harga persediaan berhasil diperbarui.");
     },
 
-    async simpanPersediaan() {
-        const nama_barang = document.getElementById("namaBarang").value.trim();
-        const stok = parseInt(document.getElementById("stok").value, 10);
-        const hargaInput = document.getElementById("hargaPersediaan");
-        const harga = hargaInput ? parseFloat(hargaInput.value) : NaN;
-        const satuan = document.getElementById("satuan").value.trim() || "Galon";
-
-        if (!nama_barang) return alert("Nama barang wajib diisi.");
-        if (isNaN(stok) || stok < 0) return alert("Stok tidak valid.");
-        if (!hargaInput || !Number.isFinite(harga) || harga < 0) {
-            return alert("Harga per galon tidak valid.");
-        }
-
-        const existing = await Utils.guard(
-            sb.from(CONFIG.TABLES.PERSEDIAAN)
-              .select("id_persediaan, stok")
-              .ilike("nama_barang", nama_barang)
-              .limit(1),
-            "cek persediaan yang sudah ada"
-        );
-        if (existing === null) return;
-
-        const payloadBase = {
-            satuan,
-            updated_at: new Date().toISOString()
-        };
-
-        if (existing && existing.length > 0) {
-            const item = existing[0];
-            const stokBaru = Number(item.stok || 0) + stok;
-            const payload = {
-                ...payloadBase,
-                stok: stokBaru,
-                harga
-            };
-
-            const result = await Utils.guard(
-                sb.from(CONFIG.TABLES.PERSEDIAAN)
-                  .update(payload)
-                  .eq("id_persediaan", item.id_persediaan)
-                  .select(),
-                "menambah stok persediaan"
-            );
-
-            if (!result) return;
-
-            document.getElementById("formPersediaan").reset();
-            document.getElementById("satuan").value = "Galon";
-            await this.loadPersediaan();
-            this.fillSelects();
-            this.updateDashboard();
-            alert(`Stok berhasil ditambah. Total stok ${nama_barang}: ${stokBaru}.`);
+    renderBahanPersediaan() {
+        const tbody = document.getElementById("tabelPersediaan");
+        if (!tbody) return;
+        if (!this.cache.bahanPersediaan.length) {
+            tbody.innerHTML = `<tr><td colspan="8" class="empty-data">Belum ada data bahan</td></tr>`;
             return;
         }
 
-        const insertPayload = { nama_barang, stok, satuan, harga };
+        tbody.innerHTML = this.cache.bahanPersediaan.map((bahan, index) => {
+            const stok = Number(bahan.stok_tersedia || 0);
+            const kelas = stok === 0 ? "stok-habis" : (stok <= 10 ? "stok-sedikit" : "stok-normal");
+            const stokText = stok.toLocaleString(CONFIG.LOCALE, { maximumFractionDigits: 4 });
+            return `<tr>
+                <td>${index + 1}</td>
+                <td><span class="inventory-badge ${bahan.jenis_item === "produk_pabrikan" ? "badge-factory" : "badge-refill"}">${bahan.jenis_item === "produk_pabrikan" ? "Produk Jadi Pabrikan" : "Bahan Isi Ulang"}</span></td>
+                <td>${Utils.escape(bahan.nama_bahan)}</td>
+                <td><span class="${kelas}">${stokText}</span></td>
+                <td>${Utils.escape(bahan.satuan)}</td>
+                <td>${Utils.rupiah(bahan.harga_modal_satuan)}</td>
+                <td>${Utils.tanggal(bahan.updated_at)}</td>
+                <td class="action-cell">
+                    <button class="btn-secondary" onclick="App.editItemPersediaan(${bahan.id})">
+                        <i class="fa-solid fa-pen"></i> Edit
+                    </button>
+                    <button class="btn-primary" onclick="App.bukaRestock(${bahan.id})">
+                        <i class="fa-solid fa-truck-ramp-box"></i> Restock (+)
+                    </button>
+                    <button class="btn-delete" onclick="App.hapusItemPersediaan(${bahan.id})">
+                        <i class="fa-solid fa-trash"></i> Hapus
+                    </button>
+                </td>
+            </tr>`;
+        }).join("");
+    },
+
+    async simpanKulakan() {
+        const bahanId = Number(document.getElementById("bahanKulakan").value);
+        const jumlah = Number(document.getElementById("jumlahKulakan").value);
+        const hargaSatuan = Number(document.getElementById("hargaKulakan").value);
+        if (!Number.isInteger(bahanId) || bahanId <= 0) return alert("Pilih bahan persediaan.");
+        if (!Number.isFinite(jumlah) || jumlah <= 0) return alert("Jumlah stok masuk tidak valid.");
+        if (!Number.isFinite(hargaSatuan) || hargaSatuan < 0) return alert("Harga modal satuan tidak valid.");
 
         const result = await Utils.guard(
-            sb.from(CONFIG.TABLES.PERSEDIAAN)
-              .insert(insertPayload)
+            sb.rpc("fn_catat_kulakan", {
+                p_bahan_id: bahanId,
+                p_jumlah: jumlah,
+                p_harga_satuan: hargaSatuan
+            }),
+            "mencatat stok masuk bahan"
+        );
+        if (result === null) return;
+
+        document.getElementById("formKulakan").reset();
+        await Promise.all([this.loadBahanPersediaan(), this.loadPersediaan()]);
+        this.updateDashboard();
+        this.renderLaporan();
+        alert("Stok masuk berhasil dicatat. Harga modal rata-rata dan HPP produk telah diperbarui.");
+    },
+
+    async loadKomposisiProduk() {
+        const data = await Utils.fetchAll(
+            () => sb.from(CONFIG.TABLES.KOMPOSISI_PRODUK)
+              .select("*")
+              .order("produk_id", { ascending: true })
+              .order("bahan_id", { ascending: true }),
+            "memuat komposisi produk"
+        );
+        if (data === null) return;
+        this.cache.komposisiProduk = data;
+        this.renderPersediaan();
+        this.renderKomposisiProduk();
+    },
+
+    renderKomposisiProduk() {
+        const tbody = document.getElementById("tabelKomposisi");
+        if (!tbody) return;
+        if (!this.cache.komposisiProduk.length) {
+            tbody.innerHTML = `<tr><td colspan="5" class="empty-data">Belum ada komposisi produk</td></tr>`;
+            return;
+        }
+
+        const produkById = new Map(
+            this.cache.persediaan.map(item => [Number(item.id), item])
+        );
+        const bahanById = new Map(
+            this.cache.bahanPersediaan.map(item => [Number(item.id), item])
+        );
+        tbody.innerHTML = this.cache.komposisiProduk.map(item => {
+            const produk = produkById.get(Number(item.produk_id));
+            const bahan = bahanById.get(Number(item.bahan_id));
+            const jumlah = Number(item.jumlah_pakai).toLocaleString(CONFIG.LOCALE, {
+                maximumFractionDigits: 4
+            });
+            return `<tr>
+                <td>${Utils.escape(produk?.nama_produk) || "Produk tidak ditemukan"}</td>
+                <td>${Utils.escape(bahan?.nama_bahan) || "Bahan tidak ditemukan"}</td>
+                <td>${jumlah} ${Utils.escape(bahan?.satuan || "")}</td>
+                <td>${Utils.rupiah(produk?.hpp_per_unit)}</td>
+                <td>
+                    <button class="btn-delete" onclick="App.hapusKomposisiProduk(${item.produk_id}, ${item.bahan_id})">
+                        <i class="fa-solid fa-trash"></i> Hapus
+                    </button>
+                </td>
+            </tr>`;
+        }).join("");
+    },
+
+    async simpanKomposisiProduk() {
+        const produkId = Number(document.getElementById("produkKomposisi").value);
+        const bahanId = Number(document.getElementById("bahanKomposisi").value);
+        const jumlahPakai = Number(document.getElementById("jumlahPakai").value);
+        if (!Number.isInteger(produkId) || produkId <= 0) return alert("Pilih produk.");
+        if (!Number.isInteger(bahanId) || bahanId <= 0) return alert("Pilih bahan persediaan.");
+        if (!Number.isFinite(jumlahPakai) || jumlahPakai <= 0) {
+            return alert("Jumlah bahan yang dipakai per unit produk harus lebih besar dari nol.");
+        }
+
+        const result = await Utils.guard(
+            sb.from(CONFIG.TABLES.KOMPOSISI_PRODUK)
+              .upsert(
+                  { produk_id: produkId, bahan_id: bahanId, jumlah_pakai: jumlahPakai },
+                  { onConflict: "produk_id,bahan_id" }
+              )
               .select(),
-            "menyimpan persediaan baru"
+            "menyimpan komposisi produk"
         );
+        if (result === null) return;
 
-        if (!result) return;
-
-        document.getElementById("formPersediaan").reset();
-        document.getElementById("satuan").value = "Galon";
-        await this.loadPersediaan();
-        this.fillSelects();
-        this.updateDashboard();
-        alert("Persediaan baru berhasil ditambahkan.");
+        document.getElementById("formKomposisi").reset();
+        await Promise.all([this.loadKomposisiProduk(), this.loadPersediaan()]);
+        this.renderLaporan();
+        alert("Komposisi produk berhasil disimpan dan HPP per unit diperbarui.");
     },
 
-    async hapusPersediaan(id) {
-        if (!confirm("Hapus persediaan ini?")) return;
-        const ok = await Utils.guard(
-            sb.from(CONFIG.TABLES.PERSEDIAAN)
-              .delete().eq("id_persediaan", id),
-            "menghapus persediaan"
+    async hapusKomposisiProduk(produkId, bahanId) {
+        if (!confirm("Hapus bahan ini dari komposisi produk?")) return;
+        const result = await Utils.guard(
+            sb.from(CONFIG.TABLES.KOMPOSISI_PRODUK)
+              .delete()
+              .eq("produk_id", produkId)
+              .eq("bahan_id", bahanId)
+              .select("produk_id"),
+            "menghapus komposisi produk"
         );
-        if (ok === null) return;
-        await this.loadPersediaan();
+        if (result === null) return;
+        if (!result.length) {
+            alert("Komposisi tidak terhapus. Periksa izin akses dan data yang dipilih.");
+            return;
+        }
+        await Promise.all([this.loadKomposisiProduk(), this.loadPersediaan()]);
+        this.renderLaporan();
+    },
+
+    bukaFormItem(item = null) {
+        const card = document.getElementById("itemPersediaanFormCard");
+        document.getElementById("formItemPersediaan").reset();
+        document.getElementById("itemPersediaanId").value = item?.id || "";
+        document.getElementById("itemPersediaanFormTitle").textContent =
+            item ? "Edit Item Persediaan" : "Tambah Item Persediaan";
+        document.getElementById("jenisItem").value = item?.jenis_item || "bahan_isi_ulang";
+        document.getElementById("namaItem").value = item?.nama_bahan || "";
+        document.getElementById("stokItem").value = item?.stok_tersedia ?? "";
+        document.getElementById("satuanItem").value = item?.satuan || "";
+        document.getElementById("hargaModalItem").value = item?.harga_modal_satuan ?? "";
+        card.classList.remove("hidden");
+        card.scrollIntoView({ behavior: "smooth", block: "center" });
+    },
+
+    tutupFormItem() {
+        document.getElementById("itemPersediaanFormCard")?.classList.add("hidden");
+    },
+
+    editItemPersediaan(id) {
+        const item = this.cache.bahanPersediaan.find(row => Number(row.id) === Number(id));
+        if (item) this.bukaFormItem(item);
+    },
+
+    async simpanItemPersediaan() {
+        const id = Number(document.getElementById("itemPersediaanId").value) || null;
+        const payload = {
+            jenis_item: document.getElementById("jenisItem").value,
+            nama_bahan: document.getElementById("namaItem").value.trim(),
+            stok_tersedia: Number(document.getElementById("stokItem").value),
+            satuan: document.getElementById("satuanItem").value.trim(),
+            harga_modal_satuan: Number(document.getElementById("hargaModalItem").value)
+        };
+        if (!payload.nama_bahan || !payload.satuan) return alert("Nama dan satuan item wajib diisi.");
+        if (!["bahan_isi_ulang", "produk_pabrikan"].includes(payload.jenis_item)) return alert("Kategori item tidak valid.");
+        if (!Number.isFinite(payload.stok_tersedia) || payload.stok_tersedia < 0) return alert("Stok tidak valid.");
+        if (!Number.isFinite(payload.harga_modal_satuan) || payload.harga_modal_satuan < 0) return alert("Harga modal tidak valid.");
+
+        const query = id
+            ? sb.from(CONFIG.TABLES.BAHAN_PERSEDIAAN).update(payload).eq("id", id).select("id")
+            : sb.from(CONFIG.TABLES.BAHAN_PERSEDIAAN).insert(payload).select("id");
+        const result = await Utils.guard(query, id ? "memperbarui item persediaan" : "menambahkan item persediaan");
+        if (result === null) return;
+        if (!result.length) return alert("Item tidak tersimpan. Periksa izin akses dan RLS Supabase.");
+        this.tutupFormItem();
+        await Promise.all([this.loadBahanPersediaan(), this.loadPersediaan(), this.loadKomposisiProduk()]);
         this.fillSelects();
         this.updateDashboard();
+        alert("Item persediaan berhasil disimpan.");
+    },
+
+    bukaRestock(id) {
+        const select = document.getElementById("bahanKulakan");
+        if (select) {
+            select.value = String(id);
+            document.getElementById("formKulakan").scrollIntoView({ behavior: "smooth", block: "center" });
+            document.getElementById("jumlahKulakan").focus();
+        }
+    },
+
+    async hapusItemPersediaan(id) {
+        if (!confirm("Hapus item persediaan ini? Item yang masih dipakai komposisi/transaksi tidak dapat dihapus.")) return;
+        const result = await Utils.guard(
+            sb.from(CONFIG.TABLES.BAHAN_PERSEDIAAN).delete().eq("id", id).select("id"),
+            "menghapus item persediaan"
+        );
+        if (result === null) return;
+        if (!result.length) return alert("Item tidak terhapus. Item mungkin masih digunakan dalam komposisi produk.");
+        await Promise.all([this.loadBahanPersediaan(), this.loadKomposisiProduk()]);
+        this.fillSelects();
+        this.updateDashboard();
+    },
+
+    bukaFormProduk(produk = null) {
+        document.getElementById("formProduk").reset();
+        document.getElementById("produkId").value = produk?.id || "";
+        document.getElementById("produkFormTitle").textContent = produk ? "Edit Produk" : "Tambah Produk";
+        document.getElementById("namaProduk").value = produk?.nama_produk || "";
+        document.getElementById("jenisProduk").value = produk?.jenis_produk || "isi_ulang";
+        document.getElementById("satuanProduk").value = produk?.satuan || "Galon";
+        document.getElementById("hargaJualProduk").value = produk?.harga_jual ?? "";
+        document.getElementById("produkFormCard").classList.remove("hidden");
+        document.getElementById("produkFormCard").scrollIntoView({ behavior: "smooth", block: "center" });
+    },
+
+    tutupFormProduk() {
+        document.getElementById("produkFormCard")?.classList.add("hidden");
+    },
+
+    editProduk(id) {
+        const produk = this.cache.persediaan.find(row => Number(row.id) === Number(id));
+        if (produk) this.bukaFormProduk(produk);
+    },
+
+    async simpanProduk() {
+        const id = Number(document.getElementById("produkId").value) || null;
+        const payload = {
+            nama_produk: document.getElementById("namaProduk").value.trim(),
+            jenis_produk: document.getElementById("jenisProduk").value,
+            satuan: document.getElementById("satuanProduk").value.trim(),
+            harga_jual: Number(document.getElementById("hargaJualProduk").value)
+        };
+        if (!payload.nama_produk || !payload.satuan) return alert("Nama dan satuan produk wajib diisi.");
+        if (!["isi_ulang", "pabrikan"].includes(payload.jenis_produk)) return alert("Kategori produk tidak valid.");
+        if (!Number.isFinite(payload.harga_jual) || payload.harga_jual < 0) return alert("Harga jual tidak valid.");
+        const query = id
+            ? sb.from(CONFIG.TABLES.PRODUK).update(payload).eq("id", id).select("id")
+            : sb.from(CONFIG.TABLES.PRODUK).insert(payload).select("id");
+        const result = await Utils.guard(query, id ? "memperbarui produk" : "menambahkan produk");
+        if (result === null) return;
+        if (!result.length) return alert("Produk tidak tersimpan. Periksa izin akses dan RLS Supabase.");
+        this.tutupFormProduk();
+        await this.loadPersediaan();
+        this.fillSelects();
+        alert("Produk berhasil disimpan.");
+    },
+
+    async hapusProduk(id) {
+        if (!confirm("Hapus produk ini? Produk yang sudah memiliki transaksi tidak dapat dihapus.")) return;
+        const result = await Utils.guard(
+            sb.from(CONFIG.TABLES.PRODUK).delete().eq("id", id).select("id"),
+            "menghapus produk"
+        );
+        if (result === null) return;
+        if (!result.length) return alert("Produk tidak terhapus. Produk mungkin sudah digunakan transaksi atau komposisi.");
+        await Promise.all([this.loadPersediaan(), this.loadKomposisiProduk()]);
+        this.fillSelects();
     },
 
     // =============================================
@@ -624,12 +1010,16 @@ const App = {
                 jumlah_galon,
                 harga_per_galon,
                 total_penjualan,
+                total_hpp,
+                laba,
                 status_pembayaran,
                 jenis_pembayaran,
                 status_penyerahan,
                 id_pelanggan,
                 id_persediaan,
+                produk_id,
                 pelanggan ( nama_pelanggan ),
+                produk ( nama_produk ),
                 persediaan ( nama_barang )
               `)
               .order("id_penjualan", { ascending: true }),
@@ -674,7 +1064,7 @@ const App = {
                     <td>${p.id_penjualan}</td>
                     <td>${Utils.tanggal(p.tanggal_penjualan)}</td>
                     <td>${Utils.escape(p.pelanggan?.nama_pelanggan) || "-"}</td>
-                    <td>${Utils.escape(p.persediaan?.nama_barang) || "-"}</td>
+                    <td>${Utils.escape(p.produk?.nama_produk || p.persediaan?.nama_barang) || "-"}</td>
                     <td>${p.jumlah_galon}</td>
                     <td>${Utils.rupiah(p.harga_per_galon)}</td>
                     <td>${Utils.rupiah(p.total_penjualan)}</td>
@@ -772,7 +1162,7 @@ const App = {
         const id_pelanggan = parseInt(
             document.getElementById("pelangganPenjualan").value, 10
         );
-        const id_persediaan = parseInt(
+        const produk_id = parseInt(
             document.getElementById("persediaanPenjualan").value, 10
         );
         const tanggal_penjualan =
@@ -786,7 +1176,7 @@ const App = {
         const jenis_pembayaran = document.getElementById("jenisPembayaranPenjualan").value;
 
         if (!id_pelanggan) return alert("Pelanggan wajib dipilih dari Master Data.");
-        if (!id_persediaan) return alert("Persediaan wajib dipilih.");
+        if (!produk_id) return alert("Produk wajib dipilih.");
         if (!jumlah_galon || jumlah_galon <= 0)
             return alert("Jumlah galon tidak valid.");
         if (isNaN(harga_per_galon) || harga_per_galon < 0)
@@ -797,7 +1187,7 @@ const App = {
         const result = await Utils.guard(
             sb.from(CONFIG.TABLES.PENJUALAN).insert({
                 id_pelanggan,
-                id_persediaan,
+                produk_id,
                 tanggal_penjualan,
                 jumlah_galon,
                 harga_per_galon,
@@ -813,6 +1203,7 @@ const App = {
         await this.loadPenjualan();
         await this.loadPenerimaan();
         await this.loadPersediaan();
+        await this.loadBahanPersediaan();
         await Promise.all([this.loadPiutang(), this.loadPenyerahan()]);
         this.fillSelects();
         this.updateDashboard();
@@ -831,6 +1222,7 @@ const App = {
         await this.loadPenjualan();
         await Promise.all([this.loadPiutang(), this.loadPenyerahan()]);
         await this.loadPersediaan();
+        await this.loadBahanPersediaan();
         this.fillSelects();
         this.updateDashboard();
         this.renderLaporan();
@@ -1048,16 +1440,48 @@ const App = {
         set("laporanTotalPenjualan", Utils.rupiah(
             penjualan.reduce((total, p) => total + Number(p.total_penjualan || 0), 0)
         ));
+        set("laporanTotalHpp", Utils.rupiah(
+            penjualan.reduce((total, p) => total + this.hppForSale(p), 0)
+        ));
+        set("laporanLaba", Utils.rupiah(
+            penjualan.reduce((total, p) => total + this.labaForSale(p), 0)
+        ));
         set("laporanTotalPenerimaan", Utils.rupiah(
             penerimaan.reduce((total, p) => total + Number(p.jumlah_diterima || 0), 0)
         ));
         set("laporanSaldoPiutang", Utils.rupiah(
-            this.cache.penjualan.reduce((total, p) => total + Math.max(
+            penjualan.reduce((total, p) => total + Math.max(
                 0, Number(p.total_penjualan || 0) - this.paidAmount(p.id_penjualan)
             ), 0)
         ));
 
         const salesBody = document.getElementById("tabelLaporanPenjualan");
+        const salesFooter = document.getElementById("tfootLaporanPenjualan");
+        const hppKnownSales = penjualan.filter(p => p.total_hpp != null);
+        const legacySalesCount = penjualan.length - hppKnownSales.length;
+        const totalSales = penjualan.reduce(
+            (total, p) => total + Number(p.total_penjualan || 0), 0
+        );
+        const totalHpp = hppKnownSales.reduce(
+            (total, p) => total + this.hppForSale(p), 0
+        );
+        const totalLaba = hppKnownSales.reduce(
+            (total, p) => total + this.labaForSale(p), 0
+        );
+        const totalPaid = penjualan.reduce(
+            (total, p) => total + this.paidAmount(p.id_penjualan), 0
+        );
+        const totalBalance = penjualan.reduce(
+            (total, p) => total + Math.max(
+                0, Number(p.total_penjualan || 0) - this.paidAmount(p.id_penjualan)
+            ), 0
+        );
+        const dataNote = document.getElementById("laporanDataHppNote");
+        if (dataNote) {
+            dataNote.textContent = legacySalesCount
+                ? `${legacySalesCount} transaksi lama belum memiliki snapshot HPP; subtotal HPP dan laba penjualan hanya mencakup transaksi dengan HPP tercatat.`
+                : "HPP dan laba penjualan dihitung dari transaksi dengan snapshot biaya yang tercatat.";
+        }
         if (salesBody) {
             salesBody.innerHTML = penjualan.length
                 ? penjualan.map(p => {
@@ -1065,14 +1489,28 @@ const App = {
                     return `<tr>
                         <td>${Utils.tanggal(p.tanggal_penjualan)}</td>
                         <td>${Utils.escape(p.pelanggan?.nama_pelanggan) || "-"}</td>
-                        <td>${Utils.escape(p.persediaan?.nama_barang) || "-"}</td>
+                        <td>${Utils.escape(p.produk?.nama_produk || p.persediaan?.nama_barang) || "-"}</td>
                         <td>${Number(p.jumlah_galon || 0)}</td>
                         <td>${Utils.rupiah(p.total_penjualan)}</td>
+                        <td>${p.total_hpp == null ? "—" : Utils.rupiah(this.hppForSale(p))}</td>
+                        <td>${p.total_hpp == null ? "—" : Utils.rupiah(this.labaForSale(p))}</td>
                         <td>${Utils.rupiah(dibayar)}</td>
                         <td>${Utils.rupiah(Math.max(0, Number(p.total_penjualan || 0) - dibayar))}</td>
                     </tr>`;
                 }).join("")
-                : `<tr><td colspan="7" class="empty-data">Tidak ada penjualan pada periode ini</td></tr>`;
+                : `<tr><td colspan="9" class="empty-data">Tidak ada penjualan pada periode ini</td></tr>`;
+        }
+        if (salesFooter) {
+            salesFooter.innerHTML = penjualan.length
+                ? `<tr>
+                    <td colspan="4">Total periode</td>
+                    <td>${Utils.rupiah(totalSales)}</td>
+                    <td>${Utils.rupiah(totalHpp)}</td>
+                    <td>${Utils.rupiah(totalLaba)}</td>
+                    <td>${Utils.rupiah(totalPaid)}</td>
+                    <td>${Utils.rupiah(totalBalance)}</td>
+                </tr>`
+                : "";
         }
 
         const receiptsBody = document.getElementById("tabelLaporanPenerimaan");
@@ -1090,15 +1528,26 @@ const App = {
 
         const inventoryBody = document.getElementById("tabelLaporanPersediaan");
         if (inventoryBody) {
-            inventoryBody.innerHTML = this.cache.persediaan.length
-                ? this.cache.persediaan.map(item => `<tr>
-                    <td>${Utils.escape(item.nama_barang)}</td>
-                    <td>${Number(item.stok || 0)}</td>
+            inventoryBody.innerHTML = this.cache.bahanPersediaan.length
+                ? this.cache.bahanPersediaan.map(item => `<tr>
+                    <td>${Utils.escape(item.nama_bahan)}</td>
+                    <td>${Number(item.stok_tersedia || 0)}</td>
                     <td>${Utils.escape(item.satuan)}</td>
-                    <td>${Utils.rupiah(item.harga)}</td>
+                    <td>${Utils.rupiah(item.harga_modal_satuan)}</td>
                 </tr>`).join("")
                 : `<tr><td colspan="4" class="empty-data">Belum ada data persediaan</td></tr>`;
         }
+    },
+
+    hppForSale(sale) {
+        return sale.total_hpp == null ? 0 : Number(sale.total_hpp);
+    },
+
+    labaForSale(sale) {
+        if (sale.total_hpp == null) return 0;
+        return sale.laba == null
+            ? Number(sale.total_penjualan || 0) - this.hppForSale(sale)
+            : Number(sale.laba);
     },
 
     // =============================================
@@ -1119,13 +1568,34 @@ const App = {
         const selPer = document.getElementById("persediaanPenjualan");
         if (selPer) {
             const cur = selPer.value;
-            selPer.innerHTML = `<option value="">Pilih Persediaan</option>` +
+            selPer.innerHTML = `<option value="">Pilih Produk</option>` +
                 this.cache.persediaan.map(p =>
-                    `<option value="${p.id_persediaan}">
-                        ${Utils.escape(p.nama_barang)} (stok: ${p.stok})
+                    `<option value="${p.id}">
+                        ${Utils.escape(p.nama_produk)} (HPP: ${Utils.rupiah(p.hpp_per_unit)})
                     </option>`).join("");
             selPer.value = cur;
         }
+
+        const selProdukKomposisi = document.getElementById("produkKomposisi");
+        if (selProdukKomposisi) {
+            const cur = selProdukKomposisi.value;
+            selProdukKomposisi.innerHTML = `<option value="">Pilih produk</option>` +
+                this.cache.persediaan.map(item =>
+                    `<option value="${item.id}">${Utils.escape(item.nama_produk)}</option>`
+                ).join("");
+            selProdukKomposisi.value = cur;
+        }
+
+        ["bahanKulakan", "bahanKomposisi"].forEach(id => {
+            const select = document.getElementById(id);
+            if (!select) return;
+            const current = select.value;
+            select.innerHTML = `<option value="">Pilih bahan persediaan</option>` +
+                this.cache.bahanPersediaan.map(item =>
+                    `<option value="${item.id}">${Utils.escape(item.nama_bahan)} (${Utils.escape(item.satuan)})</option>`
+                ).join("");
+            select.value = current;
+        });
 
         const selPen = document.getElementById("penjualanPenerimaan");
         if (selPen) {
@@ -1151,9 +1621,9 @@ const App = {
         if (selectPersediaan && hargaInput) {
             selectPersediaan.onchange = () => {
                 const selectedId = Number(selectPersediaan.value);
-                const item = this.cache.persediaan.find(p => Number(p.id_persediaan) === selectedId);
+                const item = this.cache.persediaan.find(p => Number(p.id) === selectedId);
                 if (item) {
-                    hargaInput.value = Number(item.harga || 0);
+                    hargaInput.value = Number(item.harga_jual || 0);
                     if (jumlahInput && !jumlahInput.value) {
                         jumlahInput.value = 1;
                     }
@@ -1196,8 +1666,15 @@ const App = {
         const totalPenerimaan = this.cache.penerimaan.reduce(
             (a, p) => a + Number(p.jumlah_diterima || 0), 0
         );
-        const totalPersediaan = this.cache.persediaan.reduce(
-            (a, p) => a + Number(p.stok || 0), 0
+        const totalPersediaan = this.cache.bahanPersediaan
+            .filter(item => item.jenis_item === "produk_pabrikan")
+            .reduce((total, item) => total + Number(item.stok_tersedia || 0), 0);
+        const penjualanDenganHpp = this.cache.penjualan.filter(p => p.total_hpp != null);
+        const totalHpp = penjualanDenganHpp.reduce(
+            (total, sale) => total + this.hppForSale(sale), 0
+        );
+        const laba = penjualanDenganHpp.reduce(
+            (total, sale) => total + this.labaForSale(sale), 0
         );
 
         const set = (id, val) => {
@@ -1210,6 +1687,82 @@ const App = {
         set("totalPenjualan", Utils.rupiah(totalPenjualan));
         set("totalPenerimaan", Utils.rupiah(totalPenerimaan));
         set("totalPersediaan", totalPersediaan);
+        set("totalHppDashboard", Utils.rupiah(totalHpp));
+        set("labaDashboard", Utils.rupiah(laba));
+        this.renderProfitChart(penjualanDenganHpp, totalHpp, laba);
+    },
+
+    renderProfitChart(penjualanDenganHpp, totalHpp, laba) {
+        const canvas = document.getElementById("dashboardProfitChart");
+        const note = document.getElementById("dashboardChartNote");
+        if (!canvas) return;
+        if (typeof Chart === "undefined") {
+            if (note) note.textContent = "Grafik tidak tersedia. Periksa koneksi untuk memuat Chart.js.";
+            return;
+        }
+
+        const omittedTransactions = this.cache.penjualan.length - penjualanDenganHpp.length;
+        if (note) {
+            if (laba < 0) {
+                note.textContent = "Laba penjualan negatif; nilai ditampilkan pada kartu KPI karena diagram pie tidak dapat mewakili nilai negatif.";
+            } else if (omittedTransactions) {
+                note.textContent = `${omittedTransactions} transaksi lama tanpa snapshot HPP tidak disertakan dalam grafik.`;
+            } else {
+                note.textContent = penjualanDenganHpp.length
+                    ? "Grafik menggunakan HPP dan laba penjualan dari seluruh transaksi yang tercatat."
+                    : "Belum ada transaksi dengan snapshot HPP untuk ditampilkan.";
+            }
+        }
+
+        const chartData = [totalHpp, Math.max(laba, 0)];
+        const chartLabels = ["HPP", "Laba Penjualan"];
+        if (!this.profitChart) {
+            this.profitChart = new Chart(canvas, {
+                type: "pie",
+                data: {
+                    labels: chartLabels,
+                    datasets: [{
+                        data: chartData,
+                        backgroundColor: ["#63a9cf", "#57b894"],
+                        borderColor: ["#f9fcfe", "#f9fcfe"],
+                        borderWidth: 3,
+                        hoverOffset: 8
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: "bottom",
+                            labels: {
+                                color: "#426c82",
+                                padding: 18,
+                                usePointStyle: true,
+                                pointStyle: "circle"
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: context => {
+                                    const total = context.dataset.data.reduce(
+                                        (sum, value) => sum + Number(value || 0), 0
+                                    );
+                                    const value = Number(context.raw || 0);
+                                    const percent = total > 0 ? value / total * 100 : 0;
+                                    return ` ${context.label}: ${Utils.rupiah(value)} (${percent.toFixed(1)}%)`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            return;
+        }
+
+        this.profitChart.data.labels = chartLabels;
+        this.profitChart.data.datasets[0].data = chartData;
+        this.profitChart.update();
     }
 };
 
@@ -1320,6 +1873,14 @@ const Auth = {
                     await App.realtimeChannel.unsubscribe();
                     App.realtimeChannel = null;
                 }
+                if (App.bahanRealtimeChannel) {
+                    await App.bahanRealtimeChannel.unsubscribe();
+                    App.bahanRealtimeChannel = null;
+                }
+                if (App.penjualanRealtimeChannel) {
+                    await App.penjualanRealtimeChannel.unsubscribe();
+                    App.penjualanRealtimeChannel = null;
+                }
                 Object.keys(App.cache).forEach(key => {
                     App.cache[key] = [];
                 });
@@ -1337,6 +1898,7 @@ const Auth = {
             this.appInitialized = true;
             await App.init();
         } else {
+            App.setupRealtime();
             await App.refreshAll();
         }
     }

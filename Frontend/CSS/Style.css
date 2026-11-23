@@ -618,7 +618,15 @@ main {
     grid-template-columns:
         repeat(4, 1fr);
 
-    gap: 20px;
+    gap: 16px;
+
+}
+
+.dashboard-kpis {
+
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+
+    align-items: stretch;
 
 }
 
@@ -627,7 +635,11 @@ main {
 
     background: #f9fcfe;
 
-    padding: 22px;
+    min-width: 0;
+
+    min-height: 104px;
+
+    padding: 20px;
 
     border-radius: 16px;
 
@@ -669,16 +681,91 @@ main {
 
     margin-bottom: 8px;
 
+    line-height: 1.4;
+
 }
 
 
 .dashboard-card p {
 
-    font-size: 21px;
+    font-size: clamp(17px, 1.5vw, 21px);
 
     font-weight: bold;
 
     color: #28698d;
+
+    line-height: 1.35;
+
+    overflow-wrap: anywhere;
+
+}
+
+.dashboard-chart-grid {
+
+    display: grid;
+
+    grid-template-columns: minmax(0, 1fr);
+
+    gap: 16px;
+
+    margin-top: 20px;
+
+}
+
+.dashboard-chart-card {
+
+    min-width: 0;
+
+}
+
+.chart-caption,
+.chart-note {
+
+    color: #7893a6;
+
+    font-size: 13px;
+
+    line-height: 1.6;
+
+}
+
+.dashboard-chart-wrap {
+
+    position: relative;
+
+    width: min(100%, 440px);
+
+    height: 320px;
+
+    margin: 12px auto 0;
+
+}
+
+.chart-note:empty {
+
+    display: none;
+
+}
+
+.report-table-wrap {
+
+    overflow-x: auto;
+
+}
+
+.report-table-wrap table {
+
+    min-width: 980px;
+
+}
+
+#tfootLaporanPenjualan td {
+
+    background: #edf5f9;
+
+    color: #315f78;
+
+    font-weight: 700;
 
 }
 
@@ -1029,6 +1116,62 @@ main {
 
 }
 
+.inventory-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 18px;
+}
+
+.inventory-heading h3 {
+    margin: 0;
+}
+
+.inventory-badge {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 5px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.badge-refill {
+    color: #176b54;
+    background: #e2f5ee;
+}
+
+.badge-factory {
+    color: #375d92;
+    background: #e7effb;
+}
+
+.action-cell {
+    min-width: 290px;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.action-cell button {
+    padding: 7px 10px;
+    font-size: 12px;
+}
+
+@media (max-width: 600px) {
+    .inventory-heading {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .action-cell {
+        min-width: 230px;
+    }
+}
+
 
 
 /* =====================================================
@@ -1300,6 +1443,12 @@ tbody tr:hover {
 
     }
 
+    .dashboard-kpis {
+
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+
+    }
+
 }
 
 @media (max-width: 800px) {
@@ -1319,6 +1468,12 @@ tbody tr:hover {
     .dashboard-grid {
 
         grid-template-columns: 1fr;
+
+    }
+
+    .dashboard-kpis {
+
+        grid-template-columns: repeat(2, minmax(0, 1fr));
 
     }
 
@@ -1363,6 +1518,18 @@ tbody tr:hover {
     .dashboard-grid {
 
         grid-template-columns: 1fr;
+
+    }
+
+    .dashboard-kpis {
+
+        grid-template-columns: 1fr;
+
+    }
+
+    .dashboard-chart-wrap {
+
+        height: 280px;
 
     }
 

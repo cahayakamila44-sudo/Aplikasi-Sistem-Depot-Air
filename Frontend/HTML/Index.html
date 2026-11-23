@@ -167,7 +167,36 @@
             <i class="fa-solid fa-chart-pie page-icon"></i>
         </div>
 
-        <div class="dashboard-grid">
+        <div class="dashboard-grid dashboard-kpis">
+            <div class="dashboard-card">
+                <div class="card-icon">
+                    <i class="fa-solid fa-chart-column"></i>
+                </div>
+                <div>
+                    <h3>Total Penjualan</h3>
+                    <p id="totalPenjualan">Rp 0</p>
+                </div>
+            </div>
+
+            <div class="dashboard-card">
+                <div class="card-icon">
+                    <i class="fa-solid fa-coins"></i>
+                </div>
+                <div>
+                    <h3>Total HPP</h3>
+                    <p id="totalHppDashboard">Rp 0</p>
+                </div>
+            </div>
+
+            <div class="dashboard-card">
+                <div class="card-icon">
+                    <i class="fa-solid fa-chart-line"></i>
+                </div>
+                <div>
+                    <h3>Laba Penjualan</h3>
+                    <p id="labaDashboard">Rp 0</p>
+                </div>
+            </div>
 
             <div class="dashboard-card">
                 <div class="card-icon">
@@ -191,16 +220,6 @@
 
             <div class="dashboard-card">
                 <div class="card-icon">
-                    <i class="fa-solid fa-chart-column"></i>
-                </div>
-                <div>
-                    <h3>Total Penjualan</h3>
-                    <p id="totalPenjualan">Rp 0</p>
-                </div>
-            </div>
-
-            <div class="dashboard-card">
-                <div class="card-icon">
                     <i class="fa-solid fa-money-bill-wave"></i>
                 </div>
                 <div>
@@ -214,11 +233,21 @@
                     <i class="fa-solid fa-boxes-stacked"></i>
                 </div>
                 <div>
-                    <h3>Total Stok Galon</h3>
+                    <h3>Stok Galon Pabrikan</h3>
                     <p id="totalPersediaan">0</p>
-                </div
+                </div>
             </div>
 
+        </div>
+
+        <div class="dashboard-chart-grid">
+            <div class="table-card dashboard-chart-card">
+                <h3><i class="fa-solid fa-chart-pie"></i> Komposisi Penjualan</h3>
+                <div class="dashboard-chart-wrap">
+                    <canvas id="dashboardProfitChart" role="img" aria-label="Diagram HPP dan laba penjualan"></canvas>
+                </div>
+                <p id="dashboardChartNote" class="chart-note">Memuat komposisi HPP dan laba penjualan...</p>
+            </div>
         </div>
     </section>
 
@@ -290,9 +319,9 @@
                     <option value="">Pilih pelanggan dari Master Data</option>
                 </select>
 
-                <label for="persediaanPenjualan">Barang / Persediaan</label>
+                <label for="persediaanPenjualan">Produk</label>
                 <select id="persediaanPenjualan" required>
-                    <option value="">Pilih Persediaan</option>
+                    <option value="">Pilih Produk</option>
                 </select>
 
                 <label for="tanggalPenjualan">Tanggal Penjualan</label>
@@ -509,15 +538,21 @@
         </div>
         <div class="dashboard-grid report-summary">
             <div class="dashboard-card"><div><h3>Penjualan</h3><p id="laporanTotalPenjualan">Rp 0</p></div></div>
+            <div class="dashboard-card"><div><h3>Total HPP</h3><p id="laporanTotalHpp">Rp 0</p></div></div>
+            <div class="dashboard-card"><div><h3>Laba Penjualan</h3><p id="laporanLaba">Rp 0</p></div></div>
             <div class="dashboard-card"><div><h3>Penerimaan Kas</h3><p id="laporanTotalPenerimaan">Rp 0</p></div></div>
             <div class="dashboard-card"><div><h3>Saldo Piutang</h3><p id="laporanSaldoPiutang">Rp 0</p></div></div>
         </div>
         <div class="table-card">
             <h3><i class="fa-solid fa-cart-shopping"></i> Rincian Penjualan Periode</h3>
-            <table>
-                <thead><tr><th>Tanggal</th><th>Pelanggan</th><th>Produk</th><th>Jumlah</th><th>Total</th><th>Dibayar</th><th>Sisa</th></tr></thead>
-                <tbody id="tabelLaporanPenjualan"><tr><td colspan="7" class="empty-data">Pilih periode laporan</td></tr></tbody>
-            </table>
+            <div class="report-table-wrap">
+                <table>
+                    <thead><tr><th>Tanggal</th><th>Pelanggan</th><th>Produk</th><th>Jumlah</th><th>Total</th><th>Total HPP</th><th>Laba Penjualan</th><th>Dibayar</th><th>Sisa</th></tr></thead>
+                    <tbody id="tabelLaporanPenjualan"><tr><td colspan="9" class="empty-data">Pilih periode laporan</td></tr></tbody>
+                    <tfoot id="tfootLaporanPenjualan"></tfoot>
+                </table>
+            </div>
+            <p id="laporanDataHppNote" class="chart-note"></p>
         </div>
         <div class="table-card report-card">
             <h3><i class="fa-solid fa-money-bill-wave"></i> Rincian Penerimaan Kas</h3>
@@ -552,57 +587,30 @@
             <i class="fa-solid fa-box-open page-icon"></i>
         </div>
 
-        <div class="form-card">
-            <h3>
-                <i class="fa-solid fa-box-open"></i>
-                Tambah Persediaan
-            </h3>
-
-            <form id="formPersediaan">
-
-                <label for="namaBarang">Nama Barang</label>
-                <input type="text" id="namaBarang"
-                    placeholder="Contoh: Air Galon Isi Ulang" required>
-
-                <label for="stok">Stok</label>
-                <input type="number" id="stok" min="0"
-                    placeholder="Contoh: 50" required>
-
-                <label for="hargaPersediaan">Harga per Galon</label>
-                <input type="number" id="hargaPersediaan" min="0"
-                    placeholder="Contoh: 5000" required>
-
-                <label for="satuan">Satuan</label>
-                <input type="text" id="satuan" value="Galon" required>
-
-                <button type="submit" class="btn-primary">
-                    <i class="fa-solid fa-save"></i>
-                    Simpan Persediaan
-                </button>
-            </form>
-        </div>
-
         <div class="table-card">
-            <h3>
-                <i class="fa-solid fa-boxes-stacked"></i>
-                Data Persediaan
-            </h3>
+            <div class="inventory-heading">
+                <h3><i class="fa-solid fa-boxes-stacked"></i> Bahan &amp; Stok Barang Jadi</h3>
+                <button id="btnTambahItem" type="button" class="btn-primary">
+                    <i class="fa-solid fa-plus"></i> Tambah Item Baru
+                </button>
+            </div>
 
             <table>
                 <thead>
                     <tr>
                         <th>No</th>
-                        <th>Nama Barang</th>
+                        <th>Kategori</th>
+                        <th>Nama Item</th>
                         <th>Stok</th>
-                        <th>Harga/Galon</th>
                         <th>Satuan</th>
+                        <th>Modal/Satuan</th>
                         <th>Terakhir Diperbarui</th>
                         <th>Aksi</th>
                     </tr>
                 </thead>
                 <tbody id="tabelPersediaan">
                     <tr>
-                        <td colspan="7" class="empty-data">
+                        <td colspan="8" class="empty-data">
                             <i class="fa-solid fa-box-open"></i><br>
                             Belum ada data persediaan
                         </td>
@@ -610,6 +618,106 @@
                 </tbody>
             </table>
         </div>
+
+        <div id="itemPersediaanFormCard" class="form-card hidden">
+            <h3><i class="fa-solid fa-pen-to-square"></i> <span id="itemPersediaanFormTitle">Tambah Item Persediaan</span></h3>
+            <form id="formItemPersediaan">
+                <input type="hidden" id="itemPersediaanId">
+                <label for="jenisItem">Kategori</label>
+                <select id="jenisItem" required>
+                    <option value="bahan_isi_ulang">Bahan Isi Ulang</option>
+                    <option value="produk_pabrikan">Produk Jadi Pabrikan</option>
+                </select>
+                <label for="namaItem">Nama Item</label>
+                <input type="text" id="namaItem" maxlength="100" required>
+                <label for="stokItem">Stok Tersedia</label>
+                <input type="number" id="stokItem" min="0" step="0.0001" required>
+                <label for="satuanItem">Satuan</label>
+                <input type="text" id="satuanItem" maxlength="30" required>
+                <label for="hargaModalItem">Harga Modal per Satuan</label>
+                <input type="number" id="hargaModalItem" min="0" step="0.01" required>
+                <button type="submit" class="btn-primary"><i class="fa-solid fa-save"></i> Simpan Item</button>
+                <button id="btnBatalItem" type="button" class="btn-secondary">Batal</button>
+            </form>
+        </div>
+
+        <div class="form-card">
+            <h3><i class="fa-solid fa-truck-ramp-box"></i> Restock (+)</h3>
+            <form id="formKulakan">
+                <label for="bahanKulakan">Bahan</label>
+                <select id="bahanKulakan" required>
+                    <option value="">Pilih bahan persediaan</option>
+                </select>
+                <label for="jumlahKulakan">Jumlah Masuk</label>
+                <input type="number" id="jumlahKulakan" min="0.0001" step="0.0001" required>
+                <label for="hargaKulakan">Harga Modal per Satuan</label>
+                <input type="number" id="hargaKulakan" min="0" step="0.01" required>
+                <button type="submit" class="btn-primary">
+                    <i class="fa-solid fa-save"></i> Catat Stok Masuk
+                </button>
+            </form>
+        </div>
+
+        <div class="table-card">
+            <div class="inventory-heading">
+                <h3><i class="fa-solid fa-tags"></i> Master Produk</h3>
+                <button id="btnTambahProduk" type="button" class="btn-primary">
+                    <i class="fa-solid fa-plus"></i> Tambah Produk
+                </button>
+            </div>
+            <table>
+                <thead><tr><th>No</th><th>Kategori</th><th>Nama Produk</th><th>Stok Siap Jual</th><th>Harga Jual</th><th>HPP/Unit</th><th>Aksi</th></tr></thead>
+                <tbody id="tabelProduk"><tr><td colspan="7" class="empty-data">Belum ada produk</td></tr></tbody>
+            </table>
+        </div>
+
+        <div id="produkFormCard" class="form-card hidden">
+            <h3><i class="fa-solid fa-pen-to-square"></i> <span id="produkFormTitle">Tambah Produk</span></h3>
+            <form id="formProduk">
+                <input type="hidden" id="produkId">
+                <label for="namaProduk">Nama Produk</label>
+                <input type="text" id="namaProduk" maxlength="150" required>
+                <label for="jenisProduk">Kategori Produk</label>
+                <select id="jenisProduk" required>
+                    <option value="isi_ulang">Isi Ulang</option>
+                    <option value="pabrikan">Produk Jadi Pabrikan</option>
+                </select>
+                <label for="satuanProduk">Satuan</label>
+                <input type="text" id="satuanProduk" value="Galon" maxlength="30" required>
+                <label for="hargaJualProduk">Harga Jual</label>
+                <input type="number" id="hargaJualProduk" min="0" step="0.01" required>
+                <button type="submit" class="btn-primary"><i class="fa-solid fa-save"></i> Simpan Produk</button>
+                <button id="btnBatalProduk" type="button" class="btn-secondary">Batal</button>
+            </form>
+        </div>
+
+        <div class="form-card">
+            <h3><i class="fa-solid fa-calculator"></i> Komposisi Produk untuk Perhitungan HPP</h3>
+            <form id="formKomposisi">
+                <label for="produkKomposisi">Produk</label>
+                <select id="produkKomposisi" required>
+                    <option value="">Pilih produk</option>
+                </select>
+                <label for="bahanKomposisi">Bahan</label>
+                <select id="bahanKomposisi" required>
+                    <option value="">Pilih bahan persediaan</option>
+                </select>
+                <label for="jumlahPakai">Jumlah Bahan per Unit Produk</label>
+                <input type="number" id="jumlahPakai" min="0.0001" step="0.0001" required>
+                <button type="submit" class="btn-primary">
+                    <i class="fa-solid fa-save"></i> Simpan Komposisi
+                </button>
+            </form>
+        </div>
+
+        <div class="table-card">
+            <h3><i class="fa-solid fa-list-check"></i> Komposisi Produk</h3>
+            <table>
+                <thead><tr><th>Produk</th><th>Bahan</th><th>Jumlah Pakai/Unit</th><th>HPP Produk/Unit</th><th>Aksi</th></tr></thead>
+                <tbody id="tabelKomposisi"><tr><td colspan="5" class="empty-data">Belum ada komposisi produk</td></tr></tbody>
+            </table>
+        </div>
+        <p class="module-note">Catat stok masuk dan atur komposisi setiap produk sebelum transaksi berikutnya. HPP transaksi yang tercatat sebelum fitur ini diaktifkan tidak dihitung ulang.</p>
     </section>
 
 </main>
@@ -623,10 +731,13 @@
 <!-- 1. Supabase JS Client (CDN) -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
-<!-- 2. Config -->
+<!-- 2. Chart.js -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+
+<!-- 3. Config -->
 <script src="../JS/Config.js"></script>
 
-<!-- 3. Apps -->
+<!-- 4. Apps -->
 <script src="../JS/apps.js"></script>
 
 </body>

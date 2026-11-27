@@ -1,8 +1,8 @@
 # 💧 Sistem Depot Air Minum
 
-Sistem Depot Air Minum adalah aplikasi berbasis web untuk membantu pengelolaan **penjualan, penerimaan kas, pelanggan, dan persediaan** pada usaha depot air minum.
+Sistem Depot Air Minum adalah aplikasi berbasis web untuk membantu pengelolaan **penjualan, penerimaan kas, piutang, penyerahan barang, pelanggan, katalog produk, serta bahan persediaan dan perhitungan Harga Pokok Penjualan (HPP)** pada usaha depot air minum.
 
-Aplikasi menggunakan **HTML, CSS, dan JavaScript** pada frontend serta **Supabase PostgreSQL** sebagai database.
+Aplikasi menggunakan **HTML, CSS, dan JavaScript** pada frontend serta **Supabase PostgreSQL** (termasuk **Supabase Auth**, **Realtime**, **Database Triggers**, **Views**, dan **RPC**) sebagai backend.
 
 🔗 **Demo:**
 [https://cahayakamila44-sudo.github.io/Aplikasi-Sistem-Depot-Air/](https://cahayakamila44-sudo.github.io/Aplikasi-Sistem-Depot-Air/)
@@ -11,298 +11,35 @@ Username: cahayakamila77
 
 Password: 654321
 
+---
+
 ## Teknologi
 
 | **Bagian**      | **Teknologi**                                                      |
 | --------------- | ------------------------------------------------------------------ |
 | Frontend        | HTML, CSS, JavaScript murni (tanpa framework)                      |
-| Backend         | [Supabase](https://supabase.com/) (PostgreSQL)                     |
+| Backend         | [Supabase](https://supabase.com/) (PostgreSQL, Auth, Realtime)     |
 | Koneksi         | `supabase-js` v2 melalui CDN                                       |
-| Konfigurasi     | `config.js` untuk konfigurasi koneksi Supabase                     |
+| Konfigurasi     | `config.js` untuk konfigurasi koneksi Supabase & autentikasi       |
 | Logika Aplikasi | `apps.js` untuk menjalankan fungsi utama sistem                    |
 | Tampilan        | CSS custom dan ikon [Font Awesome](https://fontawesome.com/) 6.5.2 |
 | Hosting         | [GitHub Pages](https://pages.github.com/)                          |
 
+---
+
 ## Fitur
 
-| **Menu**           | **Isi**                                                                                                                                |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------- |
-| **Dashboard**      | Total pelanggan, total transaksi, total penjualan, total penerimaan kas, dan total stok galon                                          |
-| **Penjualan**      | Form transaksi penjualan, data pelanggan, pemilihan barang, jumlah galon, harga per galon, total transaksi, status, dan data penjualan |
-| **Penerimaan Kas** | Pencatatan pembayaran berdasarkan transaksi penjualan, tanggal penerimaan, jumlah diterima, serta metode pembayaran                    |
-| **Persediaan**     | Pengelolaan nama barang, stok, harga per galon, satuan, tanggal pembaruan, dan data persediaan                                         |
+| **Menu / Modul**      | **Isi & Fungsi Utama**                                                                                                                                                              |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Dashboard**         | Ringkasan total pelanggan, total transaksi, total penjualan, total penerimaan kas, sisa piutang, laba transaksi, serta pemantauan stok bahan/produk secara *realtime*               |
+| **Penjualan**         | Form transaksi penjualan (Tunai/Kredit), pemilihan produk (`isi_ulang` / `pabrikan`), perhitungan otomatis total penjualan, `total_hpp`, `laba`, status pembayaran, dan penyerahan  |
+| **Penerimaan Kas**    | Pencatatan pembayaran tunai otomatis maupun cicilan/pelunasan piutang melalui fungsi atomik `fn_catat_penerimaan` (Tunai, Transfer, QRIS) dengan sinkronisasi status otomatis       |
+| **Piutang**           | Pemantauan daftar transaksi `Belum Lunas`, total tagihan, total dibayar, dan `sisa_piutang` melalui database view `v_piutang`                                                       |
+| **Penyerahan Barang** | Pelacakan status distribusi barang (`Belum Diserahkan` / `Sudah Sampai`) beserta status pelunasannya melalui database view `v_penyerahan_barang`                                   |
+| **Persediaan & HPP**  | Pengelolaan **Bahan Persediaan** (stok masuk/kulakan rata-rata tertimbang via `fn_catat_kulakan`), **Katalog Produk**, dan **Komposisi Resep** dengan pembaruan HPP otomatis        |
 
-### Alur Penjualan
+---
 
-Proses transaksi penjualan dimulai dengan memilih barang dari persediaan dan memasukkan data pelanggan.
+### Alur Penjualan & Perhitungan HPP
 
-```
-Persediaan
-    │
-    ▼
-Pelanggan
-    │
-    ▼
-Penjualan
-    │
-    ▼
-Penerimaan Kas
-```
-
-Data penjualan meliputi:
-
-- Nama pelanggan
-- Nomor HP
-- Alamat
-- Barang/persediaan
-- Tanggal penjualan
-- Jumlah galon
-- Harga per galon
-- Total transaksi
-- Status transaksi
-
-Harga per galon ditampilkan berdasarkan barang/persediaan yang dipilih.
-
-## Penerimaan Kas
-
-Penerimaan kas dicatat berdasarkan transaksi penjualan yang telah dibuat.
-
-| **Data**            | **Keterangan**                              |
-| ------------------- | ------------------------------------------- |
-| Transaksi Penjualan | Transaksi yang menjadi dasar penerimaan kas |
-| Tanggal Penerimaan  | Tanggal pembayaran diterima                 |
-| Jumlah Diterima     | Nominal pembayaran dari transaksi           |
-| Metode Pembayaran   | Tunai, Transfer, atau QRIS                  |
-
-### Metode Pembayaran
-
-```
-                 ┌──▶ Tunai
-Penjualan ──▶ Pembayaran ──▶ Transfer
-                 └──▶ QRIS
-```
-
-Jumlah pembayaran pada form penerimaan kas berasal dari transaksi penjualan yang dipilih.
-
-## Persediaan
-
-Persediaan digunakan untuk menyimpan informasi barang yang tersedia pada depot air minum.
-
-| **Data**            | **Keterangan**                                |
-| ------------------- | --------------------------------------------- |
-| Nama Barang         | Nama barang yang tersedia                     |
-| Stok                | Jumlah persediaan yang tersedia               |
-| Harga/Galon         | Harga barang per galon                        |
-| Satuan              | Satuan barang, misalnya `Galon`               |
-| Terakhir Diperbarui | Informasi waktu terakhir perubahan persediaan |
-
-Contoh barang:
-
-```
-Nama Barang      : Air Galon Isi Ulang
-Stok             : 50
-Harga per Galon  : Rp5.000
-Satuan           : Galon
-```
-
-## Alur Sistem
-
-```
-             ┌─────────────────┐
-             │   PERSEDIAAN    │
-             └────────┬────────┘
-                      │
-                      ▼
-             ┌─────────────────┐
-             │    PENJUALAN    │
-             │                 │
-             │ • Pelanggan     │
-             │ • Barang        │
-             │ • Jumlah Galon  │
-             │ • Harga         │
-             └────────┬────────┘
-                      │
-                      ▼
-             ┌─────────────────┐
-             │ PENERIMAAN KAS  │
-             │                 │
-             │ • Tunai         │
-             │ • Transfer      │
-             │ • QRIS          │
-             └────────┬────────┘
-                      │
-                      ▼
-             ┌─────────────────┐
-             │    DASHBOARD    │
-             └─────────────────┘
-```
-
-## ERD
-
-Secara konseptual, hubungan data utama dalam Sistem Depot Air Minum dapat digambarkan sebagai berikut:
-
-```mermaid
-erDiagram
-    PELANGGAN ||--o{ PENJUALAN : melakukan
-    PERSEDIAAN ||--o{ PENJUALAN : mencatat
-    PENJUALAN ||--o{ PENERIMAAN_KAS : menerima
-
-    PELANGGAN {
-        bigint id_pelanggan PK
-        varchar nama_pelanggan
-        varchar no_hp
-        text alamat
-        timestamptz created_at
-    }
-
-    PERSEDIAAN {
-        bigint id_persediaan PK
-        varchar nama_barang
-        integer stok
-        varchar satuan
-        timestamptz updated_at
-        numeric harga
-    }
-
-    PENJUALAN {
-        bigint id_penjualan PK
-        bigint id_pelanggan FK
-        bigint id_persediaan FK
-        date tanggal_penjualan
-        integer jumlah_galon
-        numeric harga_per_galon
-        numeric total_penjualan
-        varchar status_pembayaran
-        timestamptz created_at
-    }
-
-    PENERIMAAN_KAS {
-        bigint id_penerimaan PK
-        bigint id_penjualan FK
-        date tanggal_penerimaan
-        numeric jumlah_diterima
-        varchar metode_pembayaran
-        timestamptz created_at
-    }
-```
-
-## Struktur Folder
-
-```
-Aplikasi-Sistem-Depot-Air/
-│
-├── backend/
-│   └── Database
-│
-├── frontend/
-│   ├── html/
-│   │   └── index.html
-│   │
-│   ├── css/
-│   │   └── style.css
-│   │
-│   └── js/
-│       ├── config.js
-│       └── apps.js
-│
-├── index.html
-└── README.md
-```
-
-### Fungsi File
-
-| **File**     | **Fungsi**                                                                      |
-| ------------ | ------------------------------------------------------------------------------- |
-| `Database`   | Tempat menyimpan data secara terstruktur & terorganisir                         |
-| `index.html` | Halaman utama aplikasi Sistem Depot Air Minum                                   |
-| `style.css`  | Mengatur desain dan tampilan aplikasi                                           |
-| `config.js`  | Mengatur konfigurasi koneksi dengan Supabase                                    |
-| `apps.js`    | Menangani logika aplikasi, transaksi, persediaan, penerimaan kas, dan dashboard |
-| `README.md`  | Dokumentasi aplikasi                                                            |
-
-> Struktur folder backend di atas perlu disesuaikan dengan file SQL yang benar-benar ada pada repository.
-
-## Cara Menjalankan
-
-### 1. Siapkan Database di Supabase
-
-1. Buat akun atau login di [Supabase](https://supabase.com/).
-2. Buat project baru.
-3. Buka **SQL Editor**.
-4. Jalankan SQL database Sistem Depot Air Minum yang digunakan oleh project.
-5. Pastikan tabel yang diperlukan berhasil dibuat.
-
-### 2. Hubungkan Frontend
-
-Buka:
-
-**Supabase → Project Settings → API**
-
-Kemudian salin:
-
-- **Project URL**
-- **anon / publishable key**
-
-Masukkan konfigurasi tersebut ke file:
-
-```
-frontend/js/config.js
-```
-
-Contoh:
-
-```
-const SUPABASE_URL = "https://project-id.supabase.co";
-const SUPABASE_ANON_KEY = "anon-key";
-
-const supabaseClient = supabase.createClient(
-    SUPABASE_URL,
-    SUPABASE_ANON_KEY
-);
-```
-
-> ⚠️ Jangan memasukkan `service_role` atau secret key ke dalam frontend maupun repository publik. Gunakan **anon/publishable key** untuk aplikasi client-side.
-
-### 3. Jalankan Aplikasi
-
-Cara termudah menggunakan **Visual Studio Code**:
-
-1. Buka folder project di VS Code.
-2. Install ekstensi **Live Server**.
-3. Buka `index.html`.
-4. Klik kanan.
-5. Pilih **Open with Live Server**.
-
-Aplikasi kemudian dapat dibuka melalui browser.
-
-## GitHub Pages
-
-Project ini juga dapat dijalankan menggunakan GitHub Pages.
-
-Demo aplikasi:
-
-```
-https://cahayakamila44-sudo.github.io/Aplikasi-Sistem-Depot-Air/
-```
-
-Repository:
-
-```
-https://github.com/cahayakamila44-sudo/Aplikasi-Sistem-Depot-Air
-```
-
-## Keamanan
-
-- Gunakan hanya **anon/publishable key** Supabase pada frontend.
-- Jangan menyimpan `service_role` atau secret key di repository GitHub.
-- Konfigurasi database harus menggunakan pengaturan keamanan Supabase yang sesuai.
-- Validasi data sebaiknya tidak hanya dilakukan pada browser, tetapi juga pada sisi database.
-- Untuk penggunaan produksi, autentikasi pengguna dan **Row Level Security (RLS)** sebaiknya diaktifkan.
-
-## Tentang Project
-
-**Sistem Depot Air Minum – Sistem Penjualan & Penerimaan Kas**
-
-Project ini dibuat untuk menerapkan konsep sistem informasi dalam proses pencatatan transaksi penjualan, penerimaan kas, dan pengelolaan persediaan pada usaha depot air minum.
-
-**Pengembang:** Cahaya Kamila
+Proses transaksi penjualan dimulai dari ketersediaan bahan baku/produk pabrikan yang dirangkai dalam komposisi produk, kemudian dicatat pada transaksi penjualan hingga pelunasan kas dan penyerahan barang.
